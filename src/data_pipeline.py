@@ -21,9 +21,23 @@ from src.utils import (
 
 
 def load_raw() -> pd.DataFrame:
-    """Load raw CSV data."""
-    print(f"Loading data from {CSV_FILE}...")
-    df = pd.read_csv(CSV_FILE, low_memory=False)
+    """Load raw CSV data. Downloads from HuggingFace if not found locally."""
+    import os
+    csv_path = CSV_FILE
+    if not csv_path.exists():
+        csv_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            from huggingface_hub import hf_hub_download
+            hf_repo = os.environ.get("HF_REPO_ID", "Rakshit1236/trixie-data")
+            csv_name = "jan to may police violation_anonymized791b166.csv"
+            print(f"  Downloading CSV from HuggingFace ({hf_repo})...")
+            hf_hub_download(repo_id=hf_repo, filename=csv_name, repo_type="dataset", local_dir=str(csv_path.parent))
+            csv_path = csv_path.parent / csv_name
+            print(f"  Downloaded to {csv_path}")
+        except Exception as e:
+            raise FileNotFoundError(f"CSV not found at {CSV_FILE} and could not download from HuggingFace: {e}")
+    print(f"Loading data from {csv_path}...")
+    df = pd.read_csv(csv_path, low_memory=False)
     print(f"  Raw records: {len(df):,}")
     return df
 
