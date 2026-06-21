@@ -1,12 +1,11 @@
 """
 Main dashboard tab for Trixie-Flipkart.
-Overview, heatmaps, forecast with confidence gauges, and dispatch.
+Overview, confidence gauges, forecast, and dispatch.
 """
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 
 
 def render_overview(profiles, impact, scores, ripple):
@@ -36,16 +35,17 @@ def render_overview(profiles, impact, scores, ripple):
         rt = p.get("road_type", "Other")
         road_counts[rt] = road_counts.get(rt, 0) + 1
 
-    fig = px.bar(
-        x=list(road_counts.keys()),
-        y=list(road_counts.values()),
-        labels={"x": "Road Type", "y": "Count"},
-        title="Hotspots by Road Type",
-        color=list(road_counts.keys()),
-        color_discrete_sequence=px.colors.qualitative.Set2,
-    )
-    fig.update_layout(template="plotly_dark", height=350)
-    st.plotly_chart(fig, use_container_width=True)
+    if road_counts:
+        fig = px.bar(
+            x=list(road_counts.keys()),
+            y=list(road_counts.values()),
+            labels={"x": "Road Type", "y": "Count"},
+            title="Hotspots by Road Type",
+            color=list(road_counts.keys()),
+            color_discrete_sequence=px.colors.qualitative.Set2,
+        )
+        fig.update_layout(template="plotly_dark", height=350)
+        st.plotly_chart(fig, use_container_width=True)
 
 
 def render_confidence_gauges(predictions):
@@ -57,21 +57,23 @@ def render_confidence_gauges(predictions):
 
     preds_df = pd.DataFrame(predictions)
     if preds_df.empty:
+        st.info("No predictions available")
         return
 
     top5 = preds_df.head(5)
 
-    cols = st.columns(5)
+    cols = st.columns(min(5, len(top5)))
     for i, (_, row) in enumerate(top5.iterrows()):
         with cols[i]:
-            confidence = row.get("confidence_pct", 80)
-            pred = row.get("predicted_violations", 0)
-            area = row.get("area", "Unknown")
+            confidence = float(row.get("confidence_pct", 80))
+            pred = float(row.get("predicted_violations", 0))
+            area = str(row.get("area", "Unknown"))
+            cid = int(row.get("cluster_id", 0))
 
             fig = go.Figure(go.Indicator(
                 mode="gauge+number",
                 value=confidence,
-                title={"text": f"C{int(row['cluster_id'])}<br>{area}", "font": {"size": 12}},
+                title={"text": f"C{cid}<br>{area}", "font": {"size": 12}},
                 number={"suffix": "%", "font": {"size": 20}},
                 gauge={
                     "axis": {"range": [0, 100], "tickwidth": 1},
@@ -94,17 +96,17 @@ def render_confidence_gauges(predictions):
             st.plotly_chart(fig, use_container_width=True)
             st.caption(f"Pred: {pred:.0f} violations")
 
-    st.subheader("Confidence Distribution")
-
-    if len(preds_df) >= 15:
+    if len(preds_df) >= 10:
+        st.subheader("Confidence Distribution")
         fig = go.Figure()
+        show = preds_df.head(15)
         fig.add_trace(
             go.Bar(
-                x=[f"C{int(r['cluster_id'])}" for _, r in preds_df.head(15).iterrows()],
-                y=preds_df.head(15)["confidence_pct"],
+                x=[f"C{int(r['cluster_id'])}" for _, r in show.iterrows()],
+                y=show["confidence_pct"],
                 marker_color=[
                     "#4ECDC4" if c >= 80 else "#FFCC00" if c >= 60 else "#FF6B6B"
-                    for c in preds_df.head(15)["confidence_pct"]
+                    for c in show["confidence_pct"]
                 ],
                 name="Confidence %",
             ),
@@ -125,29 +127,26 @@ def render_forecast(predictions):
         return
 
     col1, col2, col3 = st.columns(3)
-
     with col1:
         total_predicted = preds_df["predicted_violations"].sum()
         st.metric("Total Predicted Violations", f"{total_predicted:.0f}")
-
     with col2:
         high_risk = len(preds_df[preds_df["predicted_violations"] >= 30])
         st.metric("High-Risk Hotspots", high_risk)
-
     with col3:
         avg_confidence = preds_df["confidence_pct"].mean()
         st.metric("Avg Confidence", f"{avg_confidence:.0f}%")
 
+    color_col = "road_type" if "road_type" in preds_df.columns else None
     fig = px.bar(
         preds_df.head(20),
         x="cluster_id",
         y="predicted_violations",
         error_y="upper_bound",
         error_y_minus="lower_bound",
-        color="road_type" if "road_type" in preds_df.columns else None,
+        color=color_col,
         hover_data=["area", "confidence_pct"],
         title="Top 20 Predicted Hotspots",
-        labels={"cluster_id": "Cluster", "predicted_violations": "Predicted Violations"},
     )
     fig.update_layout(template="plotly_dark", height=400)
     st.plotly_chart(fig, use_container_width=True)
@@ -171,21 +170,19 @@ def render_dispatch(recommendations, dispatch_report):
 
         df = pd.DataFrame(recommendations)
         display_cols = [c for c in ["cluster_id", "area", "severity", "priority_score", "officers_needed", "timing"] if c in df.columns]
-        st.dataframe(df[display_cols], use_container_width=True)
+        if display_cols:
+            st.dataframe(df[display_cols], use_container_width=True)
 
 
 def render_tab_main(profiles, impact, scores, ripple, predictions, recommendations, dispatch_report):
     render_overview(profiles, impact, scores, ripple)
-
     st.divider()
 
     subtabs = st.tabs(["Confidence Gauges", "Tomorrow's Forecast", "Dispatch Report"])
 
     with subtabs[0]:
         render_confidence_gauges(predictions)
-
     with subtabs[1]:
         render_forecast(predictions)
-
     with subtabs[2]:
         render_dispatch(recommendations, dispatch_report)

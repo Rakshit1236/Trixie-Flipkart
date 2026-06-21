@@ -1,6 +1,6 @@
 """
 Insights tab for Trixie-Flipkart.
-XAI breakdown with root cause attribution cards + Parking Risk Index ranking.
+XAI root cause cards + Parking Risk Index ranking.
 """
 import streamlit as st
 import pandas as pd
@@ -22,62 +22,38 @@ def api_get(endpoint):
 
 
 def render_root_cause_cards(explanation, cluster_id):
-    if not explanation:
-        st.info("No XAI explanation available for this hotspot")
-        return
-
     dominant = explanation.get("dominant_factor", "Unknown")
-    pct_contributions = explanation.get("percentage_contributions", {})
+    pct = explanation.get("percentage_contributions", {})
 
-    if not pct_contributions:
+    if not pct:
         st.info("No contribution data available")
         return
 
     st.markdown(f"""
     <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-                border: 2px solid #FF6B6B;
-                border-radius: 12px;
-                padding: 20px;
-                margin: 10px 0;
-                text-align: center;">
-        <div style="font-size: 14px; color: #888; text-transform: uppercase; letter-spacing: 2px;">
-            Dominant Factor
-        </div>
-        <div style="font-size: 28px; font-weight: bold; color: #FF6B6B; margin: 8px 0;">
-            {dominant}
-        </div>
-        <div style="font-size: 13px; color: #4ECDC4;">
-            Cluster {cluster_id} — Primary contributor to congestion
-        </div>
+                border: 2px solid #FF6B6B; border-radius: 12px; padding: 20px;
+                margin: 10px 0; text-align: center;">
+        <div style="font-size: 14px; color: #888; text-transform: uppercase; letter-spacing: 2px;">Dominant Factor</div>
+        <div style="font-size: 28px; font-weight: bold; color: #FF6B6B; margin: 8px 0;">{dominant}</div>
+        <div style="font-size: 13px; color: #4ECDC4;">Cluster {cluster_id} — Primary contributor to congestion</div>
     </div>
     """, unsafe_allow_html=True)
 
     st.markdown("### Contributors")
+    colors = {"Illegal Parking": "#FF6B6B", "Parking": "#FF6B6B", "Road Width": "#4ECDC4", "Road Importance": "#4ECDC4",
+              "Density": "#45B7D1", "Event Score": "#96CEB4", "Weather": "#FFE066", "Time of Day": "#DDA0DD", "Junction Proximity": "#FF8C00"}
 
-    factor_colors = {
-        "Illegal Parking": "#FF6B6B",
-        "Parking": "#FF6B6B",
-        "Road Width": "#4ECDC4",
-        "Road Importance": "#4ECDC4",
-        "Density": "#45B7D1",
-        "Event Score": "#96CEB4",
-        "Weather": "#FFE066",
-        "Time of Day": "#DDA0DD",
-        "Junction Proximity": "#FF8C00",
-    }
-
-    for factor, pct in pct_contributions.items():
-        color = factor_colors.get(factor, "#888888")
-        bar_width = max(pct, 5)
-
+    for factor, val in pct.items():
+        c = colors.get(factor, "#888888")
+        w = max(val, 5)
         st.markdown(f"""
         <div style="margin: 8px 0;">
             <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-                <span style="font-size: 14px; font-weight: 500; color: {color};">{factor}</span>
-                <span style="font-size: 14px; font-weight: bold; color: #FAFAFA;">{pct:.0f}%</span>
+                <span style="font-size: 14px; font-weight: 500; color: {c};">{factor}</span>
+                <span style="font-size: 14px; font-weight: bold; color: #FAFAFA;">{val:.0f}%</span>
             </div>
             <div style="background: #2a2a3e; border-radius: 6px; height: 12px; overflow: hidden;">
-                <div style="background: {color}; width: {bar_width}%; height: 100%; border-radius: 6px;"></div>
+                <div style="background: {c}; width: {w}%; height: 100%; border-radius: 6px;"></div>
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -90,73 +66,66 @@ def render_tab_insights(profiles, impact, scores, pri_scores, ranked):
 
     with tabs[0]:
         st.markdown("### Root Cause Analysis")
-        st.markdown("Select a hotspot to see the root cause breakdown based on SHAP values.")
 
-        hotspot_options = [
-            f"Cluster {cid} ({profiles[cid].get('area', 'Unknown')})"
-            for cid in sorted(int(k) for k in profiles.keys())
-        ]
+        sorted_cids = sorted(profiles.keys(), key=lambda x: int(x))
+        hotspot_options = [f"C{cid} — {profiles[cid].get('area', '?')}" for cid in sorted_cids]
         hotspot_selection = st.selectbox("Select Hotspot", hotspot_options, index=0, key="xai_hotspot")
-        cid = int(hotspot_selection.split("(")[0].replace("Cluster ", "").strip())
+        cid = int(hotspot_selection.split("—")[0].replace("C", "").strip())
 
         result = api_get(f"/root_cause/{cid}")
 
         if "error" in result:
-            st.warning(f"No XAI explanation available for Cluster {cid}. {result.get('error', '')}")
+            st.warning(f"No XAI explanation for Cluster {cid}")
         else:
             render_root_cause_cards(result, cid)
-
             st.divider()
-            col1, col2 = st.columns(2)
 
-            with col1:
-                pct_contributions = result.get("percentage_contributions", {})
-                if pct_contributions:
+            pct_contributions = result.get("percentage_contributions", {})
+            feature_importance = result.get("feature_importance", {})
+
+            if pct_contributions:
+                col1, col2 = st.columns(2)
+                with col1:
                     fig = go.Figure(data=[go.Pie(
                         labels=list(pct_contributions.keys()),
                         values=list(pct_contributions.values()),
-                        hole=0.4,
-                        marker_colors=px.colors.qualitative.Set2,
+                        hole=0.4, marker_colors=px.colors.qualitative.Set2,
                     )])
                     fig.update_layout(height=350, title="Root Cause Distribution", template="plotly_dark")
                     st.plotly_chart(fig, use_container_width=True)
 
-            with col2:
-                feature_importance = result.get("feature_importance", {})
-                if feature_importance:
-                    top_features = dict(list(feature_importance.items())[:8])
-                    fig = go.Figure(data=[go.Bar(
-                        x=[v["mean_abs_shap"] for v in top_features.values()],
-                        y=list(top_features.keys()),
-                        orientation="h",
-                        marker_color="coral",
-                    )])
-                    fig.update_layout(height=350, title="Top Feature Contributions (|SHAP|)", template="plotly_dark")
-                    st.plotly_chart(fig, use_container_width=True)
+                with col2:
+                    if feature_importance:
+                        top = dict(list(feature_importance.items())[:8])
+                        fig = go.Figure(data=[go.Bar(
+                            x=[v.get("mean_abs_shap", 0) for v in top.values()],
+                            y=list(top.keys()), orientation="h", marker_color="coral",
+                        )])
+                        fig.update_layout(height=350, title="Top |SHAP| Values", template="plotly_dark")
+                        st.plotly_chart(fig, use_container_width=True)
 
-            feature_importance = result.get("feature_importance", {})
             if feature_importance:
                 st.markdown("#### Detailed Feature Contributions")
-                detail_data = []
+                rows = []
                 for name, data in feature_importance.items():
-                    detail_data.append({
+                    rows.append({
                         "Feature": name,
                         "Mean SHAP": f"{data.get('mean_shap', 0):.4f}",
                         "|SHAP|": f"{data.get('mean_abs_shap', 0):.4f}",
                         "Direction": data.get("direction", "N/A"),
                         "Consistency": f"{data.get('consistency', 0):.2f}",
                     })
-                st.dataframe(pd.DataFrame(detail_data), use_container_width=True)
+                st.dataframe(pd.DataFrame(rows), use_container_width=True)
 
     with tabs[1]:
         st.markdown("### Parking Risk Index (PRI)")
-        st.markdown("**PRI Formula:** `0.4 × Illegal Parking + 0.3 × Density + 0.2 × Road Importance + 0.1 × Event Score`")
+        st.markdown("**PRI:** `0.4 × Illegal Parking + 0.3 × Density + 0.2 × Road Importance + 0.1 × Event Score`")
 
         if pri_scores:
-            pri_data = []
+            rows = []
             for cid, pri in pri_scores.items():
                 profile = profiles.get(cid, {})
-                pri_data.append({
+                rows.append({
                     "cluster_id": cid,
                     "area": profile.get("area", "Unknown"),
                     "road_type": profile.get("road_type", "Other"),
@@ -168,7 +137,7 @@ def render_tab_insights(profiles, impact, scores, pri_scores, ranked):
                     "dominant_factor": pri.get("dominant_factor", "Unknown"),
                 })
 
-            pri_df = pd.DataFrame(pri_data).sort_values("pri_score", ascending=False)
+            pri_df = pd.DataFrame(rows).sort_values("pri_score", ascending=False)
 
             fig = px.histogram(pri_df, x="pri_score", nbins=30, title="PRI Score Distribution", color_discrete_sequence=["#FF6B6B"])
             fig.update_layout(height=350, template="plotly_dark")
@@ -179,22 +148,10 @@ def render_tab_insights(profiles, impact, scores, pri_scores, ranked):
 
             st.markdown("### PRI Component Breakdown (Top 10)")
             top10 = pri_df.head(10)
-
             fig = go.Figure()
-            for component, color in [
-                ("illegal_parking", "#FF6B6B"),
-                ("density", "#4ECDC4"),
-                ("road_importance", "#45B7D1"),
-                ("event_score", "#96CEB4"),
-            ]:
-                fig.add_trace(go.Bar(
-                    name=component.replace("_", " ").title(),
-                    x=[f"C{cid}" for cid in top10["cluster_id"]],
-                    y=top10[component],
-                    marker_color=color,
-                ))
-
-            fig.update_layout(barmode="stack", height=400, title="PRI Component Breakdown", template="plotly_dark")
+            for comp, c in [("illegal_parking", "#FF6B6B"), ("density", "#4ECDC4"), ("road_importance", "#45B7D1"), ("event_score", "#96CEB4")]:
+                fig.add_trace(go.Bar(name=comp.replace("_", " ").title(), x=[f"C{x}" for x in top10["cluster_id"]], y=top10[comp], marker_color=c))
+            fig.update_layout(barmode="stack", height=400, title="PRI Components", template="plotly_dark")
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("PRI scores not available.")
