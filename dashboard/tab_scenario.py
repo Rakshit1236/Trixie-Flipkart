@@ -1,31 +1,44 @@
 """
 Scenario simulator tab for Trixie-Flipkart.
-Preset buttons + counterfactual mode + interactive what-if engine.
+Calls backend API for what-if simulations.
 """
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import sys
-from pathlib import Path
+import requests
+import os
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import WEATHER_MULTIPLIERS, DAY_TYPE_MULTIPLIERS, SCENARIO_PRESETS
-from src.scenario_simulator import PhysicsSimulator
+BACKEND_URL = os.environ.get("BACKEND_URL", "https://rakshit1236-trixie-backend.hf.space")
+
+SCENARIO_PRESETS = {
+    "Remove Illegal Parking": {"icon": "🚫", "description": "Remove 50 illegally parked vehicles", "vehicle_reduction": 50, "weather": "Clear", "day_type": "Weekday"},
+    "Festival Day": {"icon": "🎉", "description": "Simulate festival day traffic surge", "vehicle_reduction": 0, "weather": "Clear", "day_type": "Festival Day"},
+    "Heavy Rain": {"icon": "🌧", "description": "Simulate heavy rain conditions", "vehicle_reduction": 0, "weather": "Heavy Rain", "day_type": "Weekday"},
+    "Metro Delay": {"icon": "🚇", "description": "Metro service delayed, more vehicles", "vehicle_reduction": 30, "weather": "Clear", "day_type": "Weekday"},
+    "Increase Capacity": {"icon": "🛣", "description": "Add 100 vehicles of road capacity", "vehicle_reduction": 100, "weather": "Clear", "day_type": "Weekday"},
+}
+
+
+def api_post(endpoint, payload):
+    try:
+        r = requests.post(f"{BACKEND_URL}{endpoint}", json=payload, timeout=30)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        return {"error": str(e)}
 
 
 def render_tab_scenario(profiles, impact, scores):
-    st.subheader("🧪 What-If Simulator")
+    st.subheader("What-If Simulator")
 
     st.markdown("""
     Simulate different scenarios and see instant impact on traffic.
     Use **Quick Scenarios** for one-click presets, or customize manually.
     """)
 
-    simulator = PhysicsSimulator()
-
     # ==================== QUICK SCENARIOS ====================
-    st.markdown("### ⚡ Quick Scenarios")
+    st.markdown("### Quick Scenarios")
 
     preset_cols = st.columns(5)
     selected_preset = None
@@ -42,7 +55,7 @@ def render_tab_scenario(profiles, impact, scores):
 
     # ==================== COUNTERFACTUAL MODE ====================
     st.divider()
-    st.markdown("### 🔮 Counterfactual AI")
+    st.markdown("### Counterfactual AI")
 
     counterfactual_mode = st.toggle(
         "Enable Counterfactual Mode",
@@ -53,209 +66,82 @@ def render_tab_scenario(profiles, impact, scores):
     if counterfactual_mode:
         occupancy_reduction = st.slider(
             "Parking Occupancy Reduction (%)",
-            min_value=5,
-            max_value=50,
-            value=15,
-            step=5,
-            help="Percentage reduction in parking occupancy to simulate",
+            min_value=5, max_value=50, value=15, step=5,
         )
 
     # ==================== MANUAL PARAMETERS ====================
     st.divider()
-    st.markdown("### 🎛️ Manual Parameters")
+    st.markdown("### Manual Parameters")
 
     col1, col2 = st.columns([1, 2])
 
     with col1:
         if selected_preset:
             preset = SCENARIO_PRESETS[selected_preset]
-            vehicle_reduction = st.slider(
-                "Vehicles to Remove", 0, 200, preset["vehicle_reduction"], step=5,
-            )
-            weather = st.selectbox(
-                "Weather", list(WEATHER_MULTIPLIERS.keys()),
-                index=list(WEATHER_MULTIPLIERS.keys()).index(preset["weather"]),
-            )
-            day_type = st.selectbox(
-                "Day Type", list(DAY_TYPE_MULTIPLIERS.keys()),
-                index=list(DAY_TYPE_MULTIPLIERS.keys()).index(preset["day_type"]),
-            )
+            vehicle_reduction = st.slider("Vehicles to Remove", 0, 200, preset["vehicle_reduction"], step=5)
+            weather = st.selectbox("Weather", ["Clear", "Light Rain", "Heavy Rain", "Fog"], index=["Clear", "Light Rain", "Heavy Rain", "Fog"].index(preset["weather"]))
+            day_type = st.selectbox("Day Type", ["Weekday", "Saturday", "Sunday", "Festival Day", "Public Holiday"], index=["Weekday", "Saturday", "Sunday", "Festival Day", "Public Holiday"].index(preset["day_type"]))
         else:
             vehicle_reduction = st.slider("Vehicles to Remove", 0, 200, 50, step=5)
-            weather = st.selectbox("Weather", list(WEATHER_MULTIPLIERS.keys()), index=0)
-            day_type = st.selectbox("Day Type", list(DAY_TYPE_MULTIPLIERS.keys()), index=0)
+            weather = st.selectbox("Weather", ["Clear", "Light Rain", "Heavy Rain", "Fog"], index=0)
+            day_type = st.selectbox("Day Type", ["Weekday", "Saturday", "Sunday", "Festival Day", "Public Holiday"], index=0)
 
         hotspot_options = ["All Hotspots"] + [
-            f"Cluster {cid} ({profiles[cid].get('area', 'Unknown')})"
-            for cid in sorted(profiles.keys())
+            f"Cluster {cid} ({profiles[str(cid)].get('area', 'Unknown') if str(cid) in profiles else profiles.get(cid, {}).get('area', 'Unknown')})"
+            for cid in sorted(int(k) for k in profiles.keys())
         ]
         hotspot_selection = st.selectbox("Focus on Hotspot", hotspot_options, index=0)
 
     with col2:
-        st.markdown("### 📊 Simulation Results")
+        st.markdown("### Simulation Results")
 
-        baselines = {}
-        for cid, profile in profiles.items():
-            impact_data = impact.get(cid, {})
-            baselines[cid] = {
-                "total_violations": profile.get("total_violations", 100),
-                "worst_speed_drop_pct": impact_data.get("worst_speed_drop_pct", 25),
-                "total_vhl": impact_data.get("total_vhl", 10),
-                "num_lanes": profile.get("num_lanes", 2),
-                "avg_duration_minutes": profile.get("avg_duration_minutes", 30),
-            }
-
-        if counterfactual_mode:
-            # ==================== COUNTERFACTUAL RESULTS ====================
-            if hotspot_selection == "All Hotspots":
-                total_baseline_violations = 0
-                total_scenario_violations = 0
-                total_baseline_speed = 0
-                total_scenario_speed = 0
-                total_baseline_queue = 0
-                total_scenario_queue = 0
-
-                for cid, baseline in baselines.items():
-                    result = simulator.simulate_counterfactual(baseline, occupancy_reduction, cid)
-                    total_baseline_violations += result["baseline"]["violations"]
-                    total_scenario_violations += result["scenario"]["violations"]
-                    total_baseline_speed += result["baseline"]["speed_kmh"]
-                    total_scenario_speed += result["scenario"]["speed_kmh"]
-                    total_baseline_queue += result["baseline"]["queue_length"]
-                    total_scenario_queue += result["scenario"]["queue_length"]
-
-                n = len(baselines)
-                avg_speed_change = (total_scenario_speed - total_baseline_speed) / n
-                avg_queue_change = total_scenario_queue - total_baseline_queue
-
-                m1, m2, m3, m4 = st.columns(4)
-                with m1:
-                    st.metric(
-                        "Avg Speed Change",
-                        f"+{avg_speed_change:.1f} km/h",
-                        delta=f"{total_baseline_speed/n:.1f} → {total_scenario_speed/n:.1f}",
-                    )
-                with m2:
-                    violations_change = total_baseline_violations - total_scenario_violations
-                    st.metric("Violations Reduced", f"{violations_change:.0f}")
-                with m3:
-                    st.metric("Queue Change", f"{avg_queue_change:.1f} vehicles")
-                with m4:
-                    st.metric("Occupancy Reduction", f"{occupancy_reduction}%")
-
-                st.info(f"**Counterfactual:** If parking occupancy were **{occupancy_reduction}% lower**, "
-                       f"average speed would improve by **{avg_speed_change:.1f} km/h** "
-                       f"and **{violations_change:.0f} violations** would be prevented.")
-
+        if st.button("Run Simulation", type="primary", use_container_width=True):
+            if counterfactual_mode:
+                payload = {"occupancy_reduction_pct": occupancy_reduction}
+                if hotspot_selection != "All Hotspots":
+                    cid = int(hotspot_selection.split("(")[0].replace("Cluster ", "").strip())
+                    payload["cluster_id"] = cid
+                result = api_post("/counterfactual", payload)
             else:
-                cid = int(hotspot_selection.split("(")[0].replace("Cluster ", "").strip())
-                baseline = baselines.get(cid, {})
-                result = simulator.simulate_counterfactual(baseline, occupancy_reduction, cid)
+                payload = {
+                    "vehicle_reduction": vehicle_reduction,
+                    "weather": weather,
+                    "day_type": day_type,
+                }
+                if hotspot_selection != "All Hotspots":
+                    cid = int(hotspot_selection.split("(")[0].replace("Cluster ", "").strip())
+                    payload["cluster_id"] = cid
+                result = api_post("/scenario", payload)
 
-                m1, m2, m3, m4 = st.columns(4)
-                with m1:
-                    speed_change = result["summary"]["avg_speed_change_pct"]
-                    st.metric(
-                        "Speed Change",
-                        f"+{speed_change:.1f}%",
-                        delta=f"{result['baseline']['speed_kmh']:.1f} → {result['scenario']['speed_kmh']:.1f}",
-                    )
-                with m2:
-                    st.metric("Violations Reduced", f"{result['improvement']['violations_reduced']:.0f}")
-                with m3:
-                    st.metric("Queue Length", f"{result['scenario']['queue_length']:.1f}")
-                with m4:
-                    st.metric("Occupancy Reduction", f"{occupancy_reduction}%")
+            if "error" in result:
+                st.error(f"Simulation failed: {result['error']}")
+            else:
+                if "citywide" in result:
+                    citywide = result["citywide"]
+                    m1, m2, m3, m4 = st.columns(4)
+                    with m1:
+                        st.metric("Violations Reduced", f"{citywide.get('violations_reduction_pct', 0):.1f}%")
+                    with m2:
+                        st.metric("Baseline", f"{citywide.get('baseline_violations', 0):.0f}")
+                    with m3:
+                        st.metric("Scenario", f"{citywide.get('scenario_violations', 0):.0f}")
+                    with m4:
+                        st.metric("Hotspots Affected", result.get("n_hotspots", 0))
 
+                    per_hotspot = result.get("per_hotspot", {})
+                    if per_hotspot:
+                        first_key = list(per_hotspot.keys())[0]
+                        first_result = per_hotspot[first_key]
+                        if "improvement" in first_result:
+                            st.json(first_result["improvement"])
+                elif "improvement" in result:
+                    m1, m2 = st.columns(2)
+                    with m1:
+                        st.metric("Violations Reduced", f"{result['improvement'].get('violations_reduced', 0):.0f}")
+                    with m2:
+                        st.metric("Speed Gained", f"+{result['improvement'].get('speed_gained_kmh', 0):.1f} km/h")
+                    st.json(result)
+                else:
+                    st.json(result)
         else:
-            # ==================== STANDARD SIMULATION ====================
-            if hotspot_selection == "All Hotspots":
-                result = simulator.simulate_citywide(baselines, vehicle_reduction, weather, day_type)
-                citywide = result["citywide"]
-
-                m1, m2, m3, m4 = st.columns(4)
-                with m1:
-                    st.metric(
-                        "Violations Reduced",
-                        f"{citywide['violations_reduction_pct']:.1f}%",
-                        delta=f"{citywide['scenario_violations']:.0f} → {citywide['baseline_violations']:.0f}",
-                    )
-                with m2:
-                    st.metric("VHL Reduced", f"{citywide['vhl_reduction_pct']:.1f}%")
-                with m3:
-                    st.metric("Weather Impact", f"{WEATHER_MULTIPLIERS[weather]:.2f}x")
-                with m4:
-                    st.metric("Day Impact", f"{DAY_TYPE_MULTIPLIERS[day_type]:.2f}x")
-
-                fig = make_subplots(
-                    rows=1, cols=2,
-                    subplot_titles=("Violations", "Vehicle-Hours Lost"),
-                )
-                fig.add_trace(
-                    go.Bar(
-                        x=["Baseline", "Scenario"],
-                        y=[citywide["baseline_violations"], citywide["scenario_violations"]],
-                        marker_color=["#FF6B6B", "#4ECDC4"],
-                        name="Violations",
-                    ),
-                    row=1, col=1,
-                )
-                fig.add_trace(
-                    go.Bar(
-                        x=["Baseline", "Scenario"],
-                        y=[citywide["baseline_vhl"], citywide["scenario_vhl"]],
-                        marker_color=["#FF6B6B", "#4ECDC4"],
-                        name="VHL",
-                    ),
-                    row=1, col=2,
-                )
-                fig.update_layout(height=350, title_text="City-Wide Comparison", showlegend=False, template="plotly_dark")
-                st.plotly_chart(fig, use_container_width=True)
-
-            else:
-                cid = int(hotspot_selection.split("(")[0].replace("Cluster ", "").strip())
-                baseline = baselines.get(cid, {})
-                result = simulator.simulate_removal(baseline, vehicle_reduction, weather, day_type, cid)
-
-                m1, m2, m3, m4 = st.columns(4)
-                with m1:
-                    speed_change = result["improvement"]["speed_gained_kmh"]
-                    st.metric(
-                        "Speed Change",
-                        f"+{speed_change:.1f} km/h",
-                        delta=f"{result['baseline']['speed_kmh']:.1f} → {result['scenario']['speed_kmh']:.1f}",
-                    )
-                with m2:
-                    st.metric("VHL Reduced", f"{result['improvement']['vhl_reduced']:.1f} hours")
-                with m3:
-                    st.metric("Violations Reduced", f"{result['improvement']['violations_reduced']:.0f}")
-                with m4:
-                    st.metric("Delay Reduced", f"{result['improvement']['delay_reduced_seconds']:.0f}s")
-
-                fig = go.Figure()
-                categories = ["Violations", "Speed (km/h)", "VHL", "Delay (s)"]
-                baseline_vals = [
-                    result["baseline"]["violations"],
-                    result["baseline"]["speed_kmh"],
-                    result["baseline"]["vehicle_hours_lost"],
-                    result["baseline"]["delay_seconds"],
-                ]
-                scenario_vals = [
-                    result["scenario"]["violations"],
-                    result["scenario"]["speed_kmh"],
-                    result["scenario"]["vehicle_hours_lost"],
-                    result["scenario"]["delay_seconds"],
-                ]
-                fig.add_trace(go.Bar(name="Baseline", x=categories, y=baseline_vals, marker_color="#FF6B6B"))
-                fig.add_trace(go.Bar(name="Scenario", x=categories, y=scenario_vals, marker_color="#4ECDC4"))
-                fig.update_layout(barmode="group", height=350, title_text=f"Cluster {cid} — Before vs After", template="plotly_dark")
-                st.plotly_chart(fig, use_container_width=True)
-
-                st.markdown("### Detailed Results")
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.markdown("**Baseline**")
-                    st.json(result["baseline"])
-                with col2:
-                    st.markdown("**Scenario**")
-                    st.json(result["scenario"])
+            st.info("Click **Run Simulation** to see results")

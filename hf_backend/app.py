@@ -59,6 +59,10 @@ async def startup():
 
 @app.get("/reload")
 def reload_cache():
+    # Delete local cache to force re-download from HuggingFace
+    cache_path = Path("output/pipeline_cache.json")
+    if cache_path.exists():
+        cache_path.unlink()
     load_cache()
     return {"reloaded": len(PIPELINE_STATE) > 0, "keys": list(PIPELINE_STATE.keys())}
 
