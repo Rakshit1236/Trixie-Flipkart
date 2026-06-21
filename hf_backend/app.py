@@ -4,7 +4,6 @@ Serves pre-computed pipeline results + runs simulations on demand.
 """
 import os
 import sys
-import pickle
 import json
 from pathlib import Path
 from datetime import datetime
@@ -30,20 +29,24 @@ PIPELINE_STATE = {}
 
 def load_cache():
     global PIPELINE_STATE
-    cache_path = Path("output/pipeline_cache.pkl")
+    hf_repo = os.environ.get("HF_REPO_ID", "Rakshit1236/trixie-data")
+
+    # Load JSON cache (cross-version compatible)
+    cache_path = Path("output/pipeline_cache.json")
     if not cache_path.exists():
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         try:
             from huggingface_hub import hf_hub_download
-            hf_repo = os.environ.get("HF_REPO_ID", "Rakshit1236/trixie-data")
-            hf_hub_download(repo_id=hf_repo, filename="pipeline_cache.pkl", repo_type="dataset", local_dir="output")
-            cache_path = Path("output/pipeline_cache.pkl")
+            hf_hub_download(repo_id=hf_repo, filename="pipeline_cache.json", repo_type="dataset", local_dir="output")
+            cache_path = Path("output/pipeline_cache.json")
         except Exception as e:
             print(f"Could not download cache: {e}")
             return False
+
     if cache_path.exists():
-        with open(cache_path, "rb") as f:
-            PIPELINE_STATE = pickle.load(f)
+        with open(cache_path, "r") as f:
+            PIPELINE_STATE = json.load(f)
+        print(f"Loaded cache: {len(PIPELINE_STATE)} keys")
         return True
     return False
 
@@ -51,7 +54,7 @@ def load_cache():
 @app.on_event("startup")
 async def startup():
     if not load_cache():
-        print("No cache found — run pipeline locally and upload output/pipeline_cache.pkl")
+        print("No cache found — run pipeline locally and upload output/pipeline_cache.json")
 
 
 @app.get("/reload")
@@ -139,15 +142,10 @@ def get_scores():
     if not PIPELINE_STATE:
         raise HTTPException(status_code=404, detail="Pipeline not loaded")
     ranked = PIPELINE_STATE.get("ranked")
-    ranked_list = []
-    if hasattr(ranked, "to_dict"):
-        ranked_list = ranked.to_dict(orient="records")
-    elif isinstance(ranked, list):
-        ranked_list = ranked
     return {
         "priority": {str(k): v for k, v in PIPELINE_STATE["scores"].items()},
         "pri": {str(k): v for k, v in PIPELINE_STATE["pri_scores"].items()},
-        "ranked": ranked_list,
+        "ranked": ranked if isinstance(ranked, list) else [],
     }
 
 
@@ -156,8 +154,8 @@ def get_predictions():
     if not PIPELINE_STATE:
         raise HTTPException(status_code=404, detail="Pipeline not loaded")
     preds = PIPELINE_STATE["predictions"]
-    if hasattr(preds, "to_dict"):
-        preds = preds.to_dict(orient="records")
+    if isinstance(preds, dict):
+        preds = [preds]
     return {
         "count": len(preds),
         "predictions": preds,
@@ -188,9 +186,10 @@ def get_root_cause(cluster_id: int):
     if not PIPELINE_STATE:
         raise HTTPException(status_code=404, detail="Pipeline not loaded")
     xai = PIPELINE_STATE.get("xai_explanations", {})
-    if cluster_id not in xai:
+    cid_str = str(cluster_id)
+    if cid_str not in xai and cluster_id not in xai:
         raise HTTPException(status_code=404, detail=f"No XAI explanation for cluster {cluster_id}")
-    return xai[cluster_id]
+    return xai.get(cid_str, xai.get(cluster_id, {}))
 
 
 class ScenarioRequest(BaseModel):
@@ -259,10 +258,10 @@ def run_scenario(req: ScenarioRequest):
 
     if req.cluster_id is not None:
         cid = req.cluster_id
-        if cid not in profiles:
+        if cid not in profiles and str(cid) not in profiles:
             raise HTTPException(status_code=404, detail=f"Cluster {cid} not found")
-        profile = profiles[cid]
-        impact_data = impact.get(cid, {})
+        profile = profiles.get(cid, profiles.get(str(cid), {}))
+        impact_data = impact.get(cid, impact.get(str(cid), {}))
         baseline = {
             "total_violations": profile.get("total_violations", 100),
             "worst_speed_drop_pct": impact_data.get("worst_speed_drop_pct", 25),
@@ -273,14 +272,14 @@ def run_scenario(req: ScenarioRequest):
     else:
         baselines = {}
         for cid, profile in profiles.items():
-            impact_data = impact.get(cid, {})
-            baselines[int(cid)] = {
+            impact_data = impact.get(cid, impact.get(str(cid), {}))
+            baselines[str(cid)] = {
                 "total_violations": profile.get("total_violations", 100),
                 "worst_speed_drop_pct": impact_data.get("worst_speed_drop_pct", 25),
                 "total_vhl": impact_data.get("total_vhl", 10),
                 "num_lanes": profile.get("num_lanes", 2),
             }
-        results = {str(cid): simulate_one(cid, b) for cid, b in baselines.items()}
+        results = {cid: simulate_one(cid, b) for cid, b in baselines.items()}
         total_base = sum(r["baseline"]["violations"] for r in results.values())
         total_scenario = sum(r["scenario"]["violations"] for r in results.values())
         return {
@@ -305,7 +304,6 @@ def run_counterfactual(req: CounterfactualRequest):
         raise HTTPException(status_code=404, detail="Pipeline not loaded")
 
     FREE_FLOW_SPEED = 40.0
-    LANE_CAPACITY = 600
     profiles = PIPELINE_STATE["profiles"]
     impact = PIPELINE_STATE["impact"]
 
@@ -328,10 +326,10 @@ def run_counterfactual(req: CounterfactualRequest):
 
     if req.cluster_id is not None:
         cid = req.cluster_id
-        if cid not in profiles:
+        if cid not in profiles and str(cid) not in profiles:
             raise HTTPException(status_code=404, detail=f"Cluster {cid} not found")
-        profile = profiles[cid]
-        impact_data = impact.get(cid, {})
+        profile = profiles.get(cid, profiles.get(str(cid), {}))
+        impact_data = impact.get(cid, impact.get(str(cid), {}))
         baseline = {
             "total_violations": profile.get("total_violations", 100),
             "worst_speed_drop_pct": impact_data.get("worst_speed_drop_pct", 25),
@@ -342,7 +340,7 @@ def run_counterfactual(req: CounterfactualRequest):
     else:
         results = {}
         for cid, profile in profiles.items():
-            impact_data = impact.get(cid, {})
+            impact_data = impact.get(cid, impact.get(str(cid), {}))
             baseline = {
                 "total_violations": profile.get("total_violations", 100),
                 "worst_speed_drop_pct": impact_data.get("worst_speed_drop_pct", 25),
@@ -376,7 +374,6 @@ def run_propagation(req: PropagationRequest):
         raise HTTPException(status_code=404, detail="Pipeline not loaded")
 
     from collections import deque
-    from src.utils import haversine_km
 
     profiles = PIPELINE_STATE["profiles"]
     adjacency = {cid: p.get("neighbors", []) for cid, p in profiles.items()}
@@ -387,21 +384,26 @@ def run_propagation(req: PropagationRequest):
     PROPAGATION_MIN_DELAY = 8
 
     source_cid = req.source_cluster_id
-    if source_cid not in profiles:
+    source_cid_str = str(source_cid)
+    if source_cid not in profiles and source_cid_str not in profiles:
         raise HTTPException(status_code=404, detail=f"Source cluster {source_cid} not found")
 
-    initial_demand = profiles[source_cid]["daily_rate"] * 10
+    source_profile = profiles.get(source_cid, profiles.get(source_cid_str, {}))
+    initial_demand = source_profile["daily_rate"] * 10
 
     timeline = []
-    queue = deque([(source_cid, 0, initial_demand)])
-    visited = {source_cid}
+    queue = deque([(source_cid_str, 0, initial_demand)])
+    visited = {source_cid_str}
 
     while queue:
-        cid, minute, demand = queue.popleft()
-        if minute > req.horizon_minutes or cid not in profiles:
+        cid_str, minute, demand = queue.popleft()
+        if minute > req.horizon_minutes:
             continue
 
-        profile = profiles[cid]
+        profile = profiles.get(cid_str, {})
+        if not profile:
+            continue
+
         num_lanes = profile.get("num_lanes", 2)
         capacity_vph = num_lanes * LANE_CAPACITY
         rho = min(demand / (capacity_vph + 1e-6), 0.99)
@@ -422,7 +424,7 @@ def run_propagation(req: PropagationRequest):
         timeline.append({
             "minute": minute,
             "time_str": f"{hour % 24}:{minute_of_hour:02d}",
-            "cluster_id": cid,
+            "cluster_id": cid_str,
             "area": profile.get("area", "Unknown"),
             "road_type": profile.get("road_type", "Other"),
             "speed_drop_pct": round(speed_drop_pct, 1),
@@ -431,26 +433,34 @@ def run_propagation(req: PropagationRequest):
             "severity": severity,
         })
 
-        for nid in adjacency.get(cid, []):
-            if nid in visited or nid not in profiles:
+        for nid_str in adjacency.get(cid_str, []):
+            if nid_str in visited:
                 continue
-            dist_km = haversine_km(
-                profile["centroid_lat"], profile["centroid_lon"],
-                profiles[nid]["centroid_lat"], profiles[nid]["centroid_lon"]
-            )
+            neighbor = profiles.get(nid_str, {})
+            if not neighbor:
+                continue
+
+            from math import radians, sin, cos, sqrt, atan2
+            R = 6371.0
+            lat1, lon1 = radians(profile["centroid_lat"]), radians(profile["centroid_lon"])
+            lat2, lon2 = radians(neighbor["centroid_lat"]), radians(neighbor["centroid_lon"])
+            dlat, dlon = lat2 - lat1, lon2 - lon1
+            a = sin(dlat/2)**2 + cos(lat1)*cos(lat2)*sin(dlon/2)**2
+            dist_km = R * 2 * atan2(sqrt(a), sqrt(1-a))
+
             travel_time = (dist_km / PROPAGATION_SPEED * 60) + PROPAGATION_MIN_DELAY
             next_minute = minute + int(travel_time)
             if next_minute <= req.horizon_minutes:
                 decay = 0.85 ** dist_km
                 propagated_demand = demand * decay * 0.7
                 if propagated_demand > 10:
-                    queue.append((nid, next_minute, propagated_demand))
-                    visited.add(nid)
+                    queue.append((nid_str, next_minute, propagated_demand))
+                    visited.add(nid_str)
 
     timeline.sort(key=lambda x: x["minute"])
     return {
-        "source_cid": source_cid,
-        "source_area": profiles[source_cid].get("area", "Unknown"),
+        "source_cid": source_cid_str,
+        "source_area": source_profile.get("area", "Unknown"),
         "start_hour": req.start_hour,
         "horizon_minutes": req.horizon_minutes,
         "n_affected": len(timeline),
