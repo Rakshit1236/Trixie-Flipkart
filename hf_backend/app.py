@@ -182,7 +182,11 @@ def get_warnings():
     if not PIPELINE_STATE:
         raise HTTPException(status_code=404, detail="Pipeline not loaded")
     warnings = PIPELINE_STATE.get("analytics", {}).get("warnings", {})
-    return {str(k): v for k, v in warnings.items()}
+    timestamps = PIPELINE_STATE.get("warning_timestamps", {})
+    return {
+        "warnings": {str(k): v for k, v in warnings.items()},
+        "timestamps": timestamps,
+    }
 
 
 @app.get("/root_cause/{cluster_id}")

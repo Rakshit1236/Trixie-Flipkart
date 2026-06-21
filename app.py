@@ -82,7 +82,8 @@ def load_all_data():
         "predictions": predictions.get("predictions", []),
         "recommendations": recommendations.get("recommendations", []),
         "dispatch_report": recommendations.get("dispatch_report", ""),
-        "warnings": warnings,
+        "warnings": warnings.get("warnings", warnings) if isinstance(warnings, dict) and "warnings" in warnings else warnings,
+        "warning_timestamps": warnings.get("timestamps", {}) if isinstance(warnings, dict) and "timestamps" in warnings else {},
     }
 
 
@@ -100,6 +101,7 @@ predictions = data["predictions"]
 recommendations = data["recommendations"]
 dispatch_report = data["dispatch_report"]
 warnings = data["warnings"]
+warning_timestamps = data.get("warning_timestamps", {})
 
 # ==================== MAIN CONTENT ====================
 st.title("🚗 Trixie — Parking Intelligence Platform")
@@ -131,7 +133,7 @@ with tab_insights:
 
 with tab_actions:
     from dashboard.tab_actions import render_tab_actions
-    render_tab_actions(profiles, impact, scores, warnings, recommendations)
+    render_tab_actions(profiles, impact, scores, warnings, recommendations, warning_timestamps)
 
 with tab_validation:
     from dashboard.tab_validation import render_tab_validation

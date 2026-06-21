@@ -92,7 +92,7 @@ def render_dispatch_card(rec, index):
     """, unsafe_allow_html=True)
 
 
-def render_tab_actions(profiles, impact, scores, warnings, recommendations):
+def render_tab_actions(profiles, impact, scores, warnings, recommendations, warning_timestamps=None):
     st.subheader("Actions")
 
     tab1, tab2 = st.tabs(["Early Warnings", "Action Recommendations"])
@@ -100,6 +100,22 @@ def render_tab_actions(profiles, impact, scores, warnings, recommendations):
     with tab1:
         st.markdown("### Early Warning System")
         st.markdown("Micro-forecasts for the next 15, 30, and 60 minutes with threat levels.")
+
+        if warning_timestamps:
+            ref = warning_timestamps.get("reference_time", "unknown")
+            tod = warning_timestamps.get("time_of_day", "unknown")
+            rush = warning_timestamps.get("is_rush_hour", False)
+            st.info(f"**Reference Time:** {ref} | **Time of Day:** {tod} | **Rush Hour:** {'Yes' if rush else 'No'}")
+
+            horizons_info = warning_timestamps.get("horizons", {})
+            if horizons_info:
+                cols = st.columns(len(horizons_info))
+                for i, (h, info) in enumerate(horizons_info.items()):
+                    with cols[i]:
+                        label = info.get("label", f"+{h} min")
+                        high = info.get("high", 0)
+                        med = info.get("medium", 0)
+                        st.metric(f"{label}", f"{high} HIGH / {med} MED")
 
         if warnings:
             render_warning_timeline(warnings)
