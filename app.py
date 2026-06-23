@@ -69,6 +69,8 @@ def load_all_data():
     predictions = api_get("/predictions")
     recommendations = api_get("/analytics/recommendations")
     warnings = api_get("/analytics/warnings")
+    forecast = api_get("/forecast")
+    forecast_summary = api_get("/forecast/summary")
 
     if any("error" in d for d in [hotspots, impact, scores, predictions, recommendations, warnings]):
         return None
@@ -84,6 +86,8 @@ def load_all_data():
         "dispatch_report": recommendations.get("dispatch_report", ""),
         "warnings": warnings.get("warnings", warnings) if isinstance(warnings, dict) and "warnings" in warnings else warnings,
         "warning_timestamps": warnings.get("timestamps", {}) if isinstance(warnings, dict) and "timestamps" in warnings else {},
+        "forecast": forecast.get("forecast", []) if isinstance(forecast, dict) else [],
+        "forecast_summary": forecast_summary.get("forecast_summary", []) if isinstance(forecast_summary, dict) else [],
     }
 
 
@@ -133,7 +137,8 @@ with tab_insights:
 
 with tab_actions:
     from dashboard.tab_actions import render_tab_actions
-    render_tab_actions(profiles, impact, scores, warnings, recommendations, warning_timestamps)
+    render_tab_actions(profiles, impact, scores, warnings, recommendations,
+                       data.get("forecast"), data.get("forecast_summary"))
 
 with tab_validation:
     from dashboard.tab_validation import render_tab_validation

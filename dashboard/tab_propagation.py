@@ -9,6 +9,11 @@ import folium
 from streamlit_folium import st_folium
 import requests
 import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from src.pincode_map import get_area_name
 
 BACKEND_URL = os.environ.get("BACKEND_URL", "https://rakshit1236-trixie-backend.hf.space")
 BENGALURU_LAT = 12.9716

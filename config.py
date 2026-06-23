@@ -243,12 +243,22 @@ DEFAULT_XGB_PARAMS = {
     "nthread": -1,
 }
 
-OPTUNA_N_TRIALS = 5
-OPTUNA_CV_FOLDS = 2
+DEFAULT_CATBOOST_PARAMS = {
+    "loss_function": "RMSE",
+    "verbose": 0,
+    "allow_writing_files": False,
+}
+
+OPTUNA_N_TRIALS = 30
+OPTUNA_CV_FOLDS = 5
 OPTUNA_RANDOM_STATE = 42
 
-ENSEMBLE_DEFAULT_WEIGHTS = {"lgb": 0.5, "xgb": 0.5}
+ENSEMBLE_DEFAULT_WEIGHTS = {"lgb": 0.4, "xgb": 0.35, "cat": 0.25}
 CONFIDENCE_CI_WIDTH = 0.15
+
+# Feature selection
+FEATURE_IMPORTANCE_THRESHOLD = 0.001
+TOP_FEATURES = 50
 
 # ==================== FEATURE ENGINEERING ====================
 LAG_FEATURES = [1, 2, 3, 5, 7, 14]

@@ -1,15 +1,63 @@
 """
 Actions tab for Trixie-Flipkart.
-Early Warning Timeline + Enhanced Dispatch cards.
+Early Warning Timeline + 30-Day Forecast + Dispatch cards.
 """
 import streamlit as st
 import pandas as pd
+import plotly.graph_objects as go
+import plotly.express as px
+from plotly.subplots import make_subplots
 import folium
 from streamlit_folium import st_folium
+from datetime import datetime
 
 BENGALURU_LAT = 12.9716
 BENGALURU_LON = 77.5946
 WARNING_HORIZONS = ["15", "30", "60"]
+
+
+def _compute_dynamic_warnings(profiles, scores, hour=None):
+    """Compute warnings at render time for a given hour."""
+    from config import RUSH_HOUR_MULTIPLIER, CHRONIC_MULTIPLIER, TIME_OF_DAY_MULTIPLIERS, WARNING_HORIZONS, THREAT_LEVELS
+    from src.utils import get_time_of_day
+
+    if hour is None:
+        hour = datetime.now().hour
+
+    time_of_day = get_time_of_day(hour)
+    is_rush = any(start <= hour < end for start, end in [(8, 11), (17, 21)])
+
+    def _threat(priority, is_rush, is_chronic, tod, horizon):
+        s = priority
+        if is_rush:
+            s *= RUSH_HOUR_MULTIPLIER
+        if is_chronic:
+            s *= CHRONIC_MULTIPLIER
+        s *= TIME_OF_DAY_MULTIPLIERS.get(tod, 1.0)
+        s *= 1 + (horizon / 60) * 0.003
+        return min(s, 100)
+
+    warnings = {}
+    for horizon in WARNING_HORIZONS:
+        hw = []
+        for cid, profile in profiles.items():
+            priority = scores.get(cid, {}).get("priority_score_normalized", 50)
+            ts = _threat(priority, is_rush, profile.get("is_chronic", False), time_of_day, int(horizon))
+            level = "HIGH" if ts >= THREAT_LEVELS["HIGH"] else ("MEDIUM" if ts >= THREAT_LEVELS["MEDIUM"] else "LOW")
+            hw.append({
+                "cluster_id": cid,
+                "area": profile.get("area", "Unknown"),
+                "road_type": profile.get("road_type", "Other"),
+                "threat_score": round(ts, 1),
+                "threat_level": level,
+                "is_chronic": profile.get("is_chronic", False),
+                "centroid_lat": profile.get("centroid_lat", 0),
+                "centroid_lon": profile.get("centroid_lon", 0),
+            })
+        hw.sort(key=lambda x: x["threat_score"], reverse=True)
+        warnings[str(horizon)] = hw
+
+    return warnings, time_of_day, is_rush
 
 
 def render_warning_timeline(warnings):
@@ -92,67 +140,139 @@ def render_dispatch_card(rec, index):
     """, unsafe_allow_html=True)
 
 
-def render_tab_actions(profiles, impact, scores, warnings, recommendations, warning_timestamps=None):
+def render_tab_actions(profiles, impact, scores, warnings, recommendations, forecast=None, forecast_summary=None):
     st.subheader("Actions")
 
-    tab1, tab2 = st.tabs(["Early Warnings", "Action Recommendations"])
+    tab_warn, tab_forecast, tab_dispatch = st.tabs(["Early Warnings", "30-Day Forecast", "Action Recommendations"])
 
-    with tab1:
+    # ==================== EARLY WARNINGS (DYNAMIC) ====================
+    with tab_warn:
         st.markdown("### Early Warning System")
-        st.markdown("Micro-forecasts for the next 15, 30, and 60 minutes with threat levels.")
+        st.markdown("Live micro-forecasts for the next 15, 30, and 60 minutes. Recomputed on every page load.")
 
-        if warning_timestamps:
-            ref = warning_timestamps.get("reference_time", "unknown")
-            tod = warning_timestamps.get("time_of_day", "unknown")
-            rush = warning_timestamps.get("is_rush_hour", False)
-            st.info(f"**Reference Time:** {ref} | **Time of Day:** {tod} | **Rush Hour:** {'Yes' if rush else 'No'}")
+        hour_options = list(range(24))
+        hour_labels = [f"{h:02d}:00" for h in range(24)]
+        selected_hour = st.selectbox("Forecast Hour", options=hour_options, format_func=lambda x: hour_labels[x],
+                                      index=datetime.now().hour, key="warn_hour")
 
-            horizons_info = warning_timestamps.get("horizons", {})
-            if horizons_info:
-                cols = st.columns(len(horizons_info))
-                for i, (h, info) in enumerate(horizons_info.items()):
-                    with cols[i]:
-                        label = info.get("label", f"+{h} min")
-                        high = info.get("high", 0)
-                        med = info.get("medium", 0)
-                        st.metric(f"{label}", f"{high} HIGH / {med} MED")
+        dynamic_warnings, time_of_day, is_rush = _compute_dynamic_warnings(profiles, scores, selected_hour)
 
-        if warnings:
-            render_warning_timeline(warnings)
-            st.divider()
+        rush_label = "🔴 Rush Hour" if is_rush else "🟢 Off-Peak"
+        st.info(f"**Time:** {selected_hour:02d}:00 | **Period:** {time_of_day.title()} | **Status:** {rush_label}")
 
-            horizon = st.selectbox("Time Horizon", options=WARNING_HORIZONS, format_func=lambda x: f"+{x} min", index=1, key="warn_horizon")
-            hw = warnings.get(horizon, [])
+        render_warning_timeline(dynamic_warnings)
+        st.divider()
 
-            if hw:
-                m = folium.Map(location=[BENGALURU_LAT, BENGALURU_LON], zoom_start=13, tiles="CartoDB dark_matter")
-                tc = {"HIGH": "red", "MEDIUM": "orange", "LOW": "green"}
+        horizon = st.selectbox("Time Horizon", options=WARNING_HORIZONS, format_func=lambda x: f"+{x} min", index=1, key="warn_horizon_action")
+        hw = dynamic_warnings.get(horizon, [])
 
-                for w in hw[:50]:
-                    cid = str(w.get("cluster_id", ""))
-                    p = profiles.get(cid, {})
-                    lat = p.get("centroid_lat", BENGALURU_LAT)
-                    lon = p.get("centroid_lon", BENGALURU_LON)
+        if hw:
+            high_count = sum(1 for w in hw if w["threat_level"] == "HIGH")
+            med_count = sum(1 for w in hw if w["threat_level"] == "MEDIUM")
+            low_count = len(hw) - high_count - med_count
 
-                    folium.CircleMarker(
-                        location=[lat, lon],
-                        radius=max(5, min(15, w.get("threat_score", 0) / 10)),
-                        color=tc.get(w.get("threat_level", "LOW"), "blue"),
-                        fill=True, fill_color=tc.get(w.get("threat_level", "LOW"), "blue"), fill_opacity=0.6,
-                        popup=f"C{cid} — {w.get('area', '')}<br>Threat: {w.get('threat_level', '')}",
-                    ).add_to(m)
+            c1, c2, c3 = st.columns(3)
+            c1.metric("🔴 HIGH", high_count)
+            c2.metric("🟡 MEDIUM", med_count)
+            c3.metric("🟢 LOW", low_count)
 
-                st_folium(m, width=800, height=500)
+            m = folium.Map(location=[BENGALURU_LAT, BENGALURU_LON], zoom_start=13, tiles="CartoDB dark_matter")
+            tc = {"HIGH": "red", "MEDIUM": "orange", "LOW": "green"}
 
-                df_w = pd.DataFrame(hw[:20])
-                avail = [c for c in ["cluster_id", "area", "road_type", "threat_level", "threat_score", "is_chronic"] if c in df_w.columns]
-                st.dataframe(df_w[avail], use_container_width=True)
-            else:
-                st.info(f"No warnings for +{horizon} min")
+            for w in hw[:50]:
+                cid = str(w.get("cluster_id", ""))
+                p = profiles.get(cid, profiles.get(int(cid), {}))
+                lat = p.get("centroid_lat", BENGALURU_LAT)
+                lon = p.get("centroid_lon", BENGALURU_LON)
+
+                folium.CircleMarker(
+                    location=[lat, lon],
+                    radius=max(5, min(15, w.get("threat_score", 0) / 10)),
+                    color=tc.get(w.get("threat_level", "LOW"), "blue"),
+                    fill=True, fill_color=tc.get(w.get("threat_level", "LOW"), "blue"), fill_opacity=0.6,
+                    popup=f"C{cid} — {w.get('area', '')}<br>Threat: {w.get('threat_level', '')} ({w.get('threat_score', 0):.0f})",
+                ).add_to(m)
+
+            st_folium(m, width=800, height=500)
+
+            df_w = pd.DataFrame(hw[:30])
+            avail = [c for c in ["cluster_id", "area", "road_type", "threat_level", "threat_score", "is_chronic"] if c in df_w.columns]
+            st.dataframe(df_w[avail], use_container_width=True)
+
+            # Hourly progression chart
+            st.markdown("#### Threat Score Progression (24h)")
+            hourly_data = []
+            for h in range(24):
+                hw_h, _, _ = _compute_dynamic_warnings(profiles, scores, h)
+                for w in hw_h.get("30", []):
+                    hourly_data.append({"hour": h, "cluster_id": w["cluster_id"], "threat_score": w["threat_score"], "level": w["threat_level"]})
+            df_hourly = pd.DataFrame(hourly_data)
+            if not df_hourly.empty:
+                agg = df_hourly.groupby("hour").agg(avg_threat=("threat_score", "mean"), high_count=("level", lambda x: (x == "HIGH").sum())).reset_index()
+                fig = make_subplots(specs=[[{"secondary_y": True}]])
+                fig.add_trace(go.Scatter(x=agg["hour"], y=agg["avg_threat"], name="Avg Threat", line=dict(color="#FF6B6B", width=2)), secondary_y=False)
+                fig.add_trace(go.Bar(x=agg["hour"], y=agg["high_count"], name="HIGH Count", marker_color="#FF0000", opacity=0.4), secondary_y=True)
+                fig.update_layout(title="24-Hour Threat Progression", template="plotly_dark", height=350, xaxis_title="Hour", hovermode="x unified")
+                fig.update_yaxes(title_text="Avg Threat Score", secondary_y=False)
+                fig.update_yaxes(title_text="# HIGH Threats", secondary_y=True)
+                st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info("No warnings available.")
+            st.info(f"No warnings for +{horizon} min at {selected_hour:02d}:00")
 
-    with tab2:
+    # ==================== 30-DAY FORECAST ====================
+    with tab_forecast:
+        st.markdown("### 30-Day Violation Forecast")
+        st.markdown("ML-powered daily violation predictions for the next 30 days per hotspot.")
+
+        if forecast and forecast_summary:
+            forecast_df = pd.DataFrame(forecast)
+            summary_df = pd.DataFrame(forecast_summary)
+
+            # Citywide summary chart
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=summary_df["date"], y=summary_df["upper_total"], mode="lines",
+                                     line=dict(width=0), showlegend=False))
+            fig.add_trace(go.Scatter(x=summary_df["date"], y=summary_df["lower_total"], fill="tonexty",
+                                     mode="lines", line=dict(width=0), fillcolor="rgba(78,205,196,0.15)",
+                                     name="90% CI"))
+            fig.add_trace(go.Scatter(x=summary_df["date"], y=summary_df["total_predicted"], mode="lines+markers",
+                                     line=dict(color="#4ECDC4", width=2), name="Predicted Total", marker=dict(size=4)))
+            fig.update_layout(title="Citywide 30-Day Forecast", template="plotly_dark", height=400,
+                              xaxis_title="Date", yaxis_title="Total Violations", hovermode="x unified")
+            st.plotly_chart(fig, use_container_width=True)
+
+            # Per-hotspot selector
+            top_hotspots = forecast_df.groupby("cluster_id")["predicted_violations"].mean().nlargest(20).index.tolist()
+            selected_clusters = st.multiselect("Select Hotspots", options=top_hotspots, default=top_hotspots[:5], key="fc_clusters")
+
+            if selected_clusters:
+                fig2 = go.Figure()
+                colors = px.colors.qualitative.Set2
+                for i, cid in enumerate(selected_clusters):
+                    subset = forecast_df[forecast_df["cluster_id"] == cid]
+                    area = subset["area"].iloc[0] if len(subset) > 0 else f"Cluster {cid}"
+                    fig2.add_trace(go.Scatter(x=subset["date"], y=subset["predicted_violations"],
+                                              mode="lines+markers", name=f"C{cid} — {area}",
+                                              line=dict(color=colors[i % len(colors)], width=2),
+                                              marker=dict(size=3)))
+                fig2.update_layout(title="Per-Hotspot 30-Day Forecast", template="plotly_dark", height=400,
+                                   xaxis_title="Date", yaxis_title="Predicted Violations", hovermode="x unified")
+                st.plotly_chart(fig2, use_container_width=True)
+
+            # Forecast table
+            st.markdown("#### Top 20 Hotspots — Average Daily Forecast")
+            agg_fc = forecast_df.groupby(["cluster_id", "area", "road_type"]).agg(
+                avg_predicted=("predicted_violations", "mean"),
+                max_predicted=("predicted_violations", "max"),
+                avg_lower=("lower_bound", "mean"),
+                avg_upper=("upper_bound", "mean"),
+            ).reset_index().sort_values("avg_predicted", ascending=False)
+            st.dataframe(agg_fc.head(20), use_container_width=True)
+        else:
+            st.info("No 30-day forecast available. Re-run the pipeline to generate forecasts.")
+
+    # ==================== DISPATCH RECOMMENDATIONS ====================
+    with tab_dispatch:
         st.markdown("### Dispatch Recommendations")
 
         if recommendations:

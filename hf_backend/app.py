@@ -189,6 +189,20 @@ def get_warnings():
     }
 
 
+@app.get("/forecast")
+def get_forecast():
+    if not PIPELINE_STATE:
+        raise HTTPException(status_code=404, detail="Pipeline not loaded")
+    return {"forecast": PIPELINE_STATE.get("forecast", [])}
+
+
+@app.get("/forecast/summary")
+def get_forecast_summary():
+    if not PIPELINE_STATE:
+        raise HTTPException(status_code=404, detail="Pipeline not loaded")
+    return {"forecast_summary": PIPELINE_STATE.get("forecast_summary", [])}
+
+
 @app.get("/root_cause/{cluster_id}")
 def get_root_cause(cluster_id: int):
     if not PIPELINE_STATE:

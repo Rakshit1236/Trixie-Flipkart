@@ -313,12 +313,61 @@ def generate_dispatch_report(recommendations: List[Dict], date_str: str = None) 
     return "\n".join(lines)
 
 
+def compute_dynamic_warnings(profiles: Dict[int, Dict], scores: Dict[int, Dict],
+                              hour: int = None) -> Dict[int, List[Dict]]:
+    """
+    Compute early warnings dynamically for a given hour.
+    Called at render time, not pipeline time.
+    """
+    if hour is None:
+        hour = datetime.now().hour
+
+    time_of_day = get_time_of_day(hour)
+    is_rush = any(start <= hour < end for start, end in [(8, 11), (17, 21)])
+
+    warnings = {}
+
+    for horizon in WARNING_HORIZONS:
+        horizon_warnings = []
+
+        for cid, profile in profiles.items():
+            priority = scores.get(cid, {}).get("priority_score_normalized", 50)
+
+            threat_score = _compute_threat_score(
+                priority, is_rush, profile.get("is_chronic", False),
+                time_of_day, horizon
+            )
+
+            if threat_score >= THREAT_LEVELS["HIGH"]:
+                threat_level = "HIGH"
+            elif threat_score >= THREAT_LEVELS["MEDIUM"]:
+                threat_level = "MEDIUM"
+            else:
+                threat_level = "LOW"
+
+            horizon_warnings.append({
+                "cluster_id": cid,
+                "area": profile.get("area", "Unknown"),
+                "road_type": profile.get("road_type", "Other"),
+                "threat_score": round(threat_score, 1),
+                "threat_level": threat_level,
+                "is_chronic": profile.get("is_chronic", False),
+                "centroid_lat": profile.get("centroid_lat", 0),
+                "centroid_lon": profile.get("centroid_lon", 0),
+            })
+
+        horizon_warnings.sort(key=lambda x: x["threat_score"], reverse=True)
+        warnings[horizon] = horizon_warnings
+
+    return warnings
+
+
 def run_analytics(profiles: Dict[int, Dict], impact: Dict[int, Dict],
                    scores: Dict[int, Dict], ripple: Dict[int, Dict]) -> Dict:
     print("Running analytics...")
 
     recommendations = generate_recommendations(profiles, impact, scores)
-    warnings = generate_early_warnings(profiles, impact, scores)
+    warnings = compute_dynamic_warnings(profiles, scores)
     dispatch_report = generate_dispatch_report(recommendations)
 
     return {

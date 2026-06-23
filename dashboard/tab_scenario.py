@@ -8,6 +8,11 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import requests
 import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from src.pincode_map import get_area_name
 
 BACKEND_URL = os.environ.get("BACKEND_URL", "https://rakshit1236-trixie-backend.hf.space")
 
@@ -59,7 +64,7 @@ def render_tab_scenario(profiles, impact, scores):
             occupancy_reduction = st.slider("Occupancy Reduction (%)", 5, 50, 15, step=5)
 
         hotspot_options = ["All Hotspots"] + [
-            f"C{cid} — {profiles[cid].get('area', '?')}"
+            f"C{cid} — {get_area_name(profiles[cid].get('area', '?'))}"
             for cid in sorted(profiles.keys(), key=lambda x: int(x))
         ]
         hotspot_selection = st.selectbox("Focus Hotspot", hotspot_options, index=0)
