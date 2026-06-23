@@ -118,6 +118,55 @@ def resolve_all_areas():
             fc["area"] = resolve_area(fc["area"])
 
 
+ACTION_MAP = {
+    "Illegal Parking": {
+        "action": "Deploy Enforcement + Boot/Tow",
+        "detail": "High illegal parking concentration — deploy officers to boot or tow repeat offenders during peak hours",
+        "resource": "Enforcement Team + Tow Truck",
+    },
+    "Density": {
+        "action": "Reroute + Deploy Traffic Officers",
+        "detail": "Vehicle density exceeds capacity — redirect traffic to alternate routes and deploy officers at entry points",
+        "resource": "Traffic Police + Reroute Signs",
+    },
+    "Junction Effects": {
+        "action": "Signal Timing + Officer at Junction",
+        "detail": "Junction conflict causing cascade — optimize signal timing and station officer to manage flow",
+        "resource": "Traffic Police + Signal Tech",
+    },
+    "Time of Day": {
+        "action": "Rush Hour Deployment Surge",
+        "detail": "Peak-hour violation concentration — surge deployment 30 min before rush hour (7:30 AM / 4:30 PM)",
+        "resource": "Mobile Patrol Units",
+    },
+    "Chronic Pattern": {
+        "action": "Persistent Hotspot Crackdown",
+        "detail": "Chronic recurring hotspot — sustained weekly enforcement blitz with camera monitoring",
+        "resource": "Enforcement Team + CCTV",
+    },
+    "Road Width": {
+        "action": "No-Parking Zone + Signage",
+        "detail": "Narrow road with limited capacity — enforce strict no-parking zone and install clear signage",
+        "resource": "Signage Team + Enforcement",
+    },
+}
+DEFAULT_ACTION = {"action": "Deploy Officers", "detail": "Standard deployment to monitor and enforce parking regulations", "resource": "Patrol Unit"}
+
+
+def enrich_recommendations_with_xai():
+    """Merge XAI root cause data into recommendations for differentiated actions."""
+    xai = PIPELINE_STATE.get("xai_explanations", {})
+    recs = PIPELINE_STATE.get("analytics", {}).get("recommendations", [])
+    for rec in recs:
+        cid_str = str(rec.get("cluster_id", ""))
+        dominant = xai.get(cid_str, {}).get("dominant_factor", "Unknown")
+        cfg = ACTION_MAP.get(dominant, DEFAULT_ACTION)
+        rec["dominant_factor"] = dominant
+        rec["action"] = cfg["action"]
+        rec["action_detail"] = cfg["detail"]
+        rec["resource_type"] = cfg["resource"]
+
+
 def load_cache():
     global PIPELINE_STATE
     hf_repo = os.environ.get("HF_REPO_ID", "Rakshit1236/trixie-data")
@@ -138,6 +187,7 @@ def load_cache():
         with open(cache_path, "r") as f:
             PIPELINE_STATE = json.load(f)
         resolve_all_areas()
+        enrich_recommendations_with_xai()
         print(f"Loaded cache: {len(PIPELINE_STATE)} keys")
         return True
     return False

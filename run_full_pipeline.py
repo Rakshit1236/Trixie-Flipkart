@@ -89,7 +89,7 @@ for i, cid in enumerate(cluster_ids):
 print(f"  XAI: {len(xai_explanations)} explanations generated")
 
 print("=== Step 6: Analytics ===")
-analytics_results = run_analytics(profiles, impact, scores, ripple)
+analytics_results = run_analytics(profiles, impact, scores, ripple, xai=xai_explanations)
 
 print("=== Step 7: Visualizations ===")
 viz_paths = generate_all_visualizations(df, profiles, impact, predictions, ranked)

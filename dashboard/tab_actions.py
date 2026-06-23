@@ -101,8 +101,20 @@ def render_dispatch_card(rec, index):
         "MEDIUM": {"color": "#FFCC00", "bg": "linear-gradient(135deg, #2d2a1b 0%, #1a1a2e 100%)", "border": "#FFCC00"},
         "LOW": {"color": "#00CC00", "bg": "linear-gradient(135deg, #1b2d1b 0%, #1a1a2e 100%)", "border": "#00CC00"},
     }
+    factor_cfg = {
+        "Illegal Parking": {"icon": "🚫", "color": "#FF6B6B"},
+        "Density": {"icon": "📊", "color": "#45B7D1"},
+        "Junction Effects": {"icon": "🔀", "color": "#FF8C00"},
+        "Time of Day": {"icon": "⏰", "color": "#DDA0DD"},
+        "Chronic Pattern": {"icon": "🔁", "color": "#96CEB4"},
+        "Road Width": {"icon": "🛣️", "color": "#4ECDC4"},
+    }
     cfg = sev_cfg.get(rec.get("severity", "LOW"), sev_cfg["LOW"])
     chronic = " ⚠️ CHRONIC" if rec.get("is_chronic") else ""
+    factor = rec.get("dominant_factor", "Unknown")
+    fc = factor_cfg.get(factor, {"icon": "🔍", "color": "#888"})
+    action = rec.get("action", "Deploy Officers")
+    action_detail = rec.get("action_detail", "")
 
     st.markdown(f"""
     <div style="background: {cfg['bg']}; border: 1px solid {cfg['border']}; border-radius: 12px; padding: 16px; margin: 8px 0;">
@@ -114,6 +126,10 @@ def render_dispatch_card(rec, index):
                 <span style="font-size: 12px; color: {cfg['color']}; margin-left: 8px;">{rec.get('severity', '')}{chronic}</span>
             </div>
             <div style="font-size: 14px; color: #888;">Score: {rec.get('priority_score', 0):.0f}</div>
+        </div>
+        <div style="margin-top: 8px; padding: 8px 12px; background: rgba(255,255,255,0.05); border-radius: 8px;">
+            <span style="font-size: 13px; color: {fc['color']}; font-weight: bold;">{fc['icon']} Root Cause: {factor}</span>
+            <div style="font-size: 12px; color: #aaa; margin-top: 4px;">{action_detail}</div>
         </div>
         <div style="display: flex; gap: 16px; margin-top: 12px;">
             <div style="background: #0E1117; border-radius: 8px; padding: 10px 16px; text-align: center; min-width: 100px;">
@@ -128,9 +144,9 @@ def render_dispatch_card(rec, index):
                 <div style="font-size: 11px; color: #888;">REDUCE</div>
                 <div style="font-size: 20px; font-weight: bold; color: #45B7D1;">{rec.get('expected_delay_reduction_pct', 0)}%</div>
             </div>
-            <div style="background: #0E1117; border-radius: 8px; padding: 10px 16px; text-align: center; min-width: 120px;">
+            <div style="background: #0E1117; border-radius: 8px; padding: 10px 16px; text-align: center; min-width: 140px;">
                 <div style="font-size: 11px; color: #888;">ACTION</div>
-                <div style="font-size: 13px; font-weight: bold; color: #96CEB4;">{rec.get('resource_type', 'Monitor')}</div>
+                <div style="font-size: 12px; font-weight: bold; color: #96CEB4;">{action}</div>
             </div>
         </div>
         <div style="margin-top: 10px; font-size: 12px; color: #666;">

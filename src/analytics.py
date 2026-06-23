@@ -137,7 +137,8 @@ class CongestionPropagation:
 
 
 def generate_recommendations(profiles: Dict[int, Dict], impact: Dict[int, Dict],
-                              scores: Dict[int, Dict], top_n: int = 20) -> List[Dict]:
+                              scores: Dict[int, Dict], xai: Dict = None,
+                              top_n: int = 20) -> List[Dict]:
     print("Generating action recommendations...")
 
     sorted_cids = sorted(
@@ -145,6 +146,45 @@ def generate_recommendations(profiles: Dict[int, Dict], impact: Dict[int, Dict],
         key=lambda cid: scores[cid].get("priority_score_normalized", 0),
         reverse=True
     )[:top_n]
+
+    ACTION_MAP = {
+        "Illegal Parking": {
+            "action": "Deploy Enforcement + Boot/Tow",
+            "detail": "High illegal parking concentration — deploy officers to boot or tow repeat offenders during peak hours",
+            "resource": "Enforcement Team + Tow Truck",
+        },
+        "Density": {
+            "action": "Reroute + Deploy Traffic Officers",
+            "detail": "Vehicle density exceeds capacity — redirect traffic to alternate routes and deploy officers at entry points",
+            "resource": "Traffic Police + Reroute Signs",
+        },
+        "Junction Effects": {
+            "action": "Signal Timing + Officer at Junction",
+            "detail": "Junction conflict causing cascade — optimize signal timing and station officer to manage flow",
+            "resource": "Traffic Police + Signal Tech",
+        },
+        "Time of Day": {
+            "action": "Rush Hour Deployment Surge",
+            "detail": "Peak-hour violation concentration — surge deployment 30 min before rush hour (7:30 AM / 4:30 PM)",
+            "resource": "Mobile Patrol Units",
+        },
+        "Chronic Pattern": {
+            "action": "Persistent Hotspot Crackdown",
+            "detail": "Chronic recurring hotspot — sustained weekly enforcement blitz with camera monitoring",
+            "resource": "Enforcement Team + CCTV",
+        },
+        "Road Width": {
+            "action": "No-Parking Zone + Signage",
+            "detail": "Narrow road with limited capacity — enforce strict no-parking zone and install clear signage",
+            "resource": "Signage Team + Enforcement",
+        },
+    }
+
+    DEFAULT_ACTION = {
+        "action": "Deploy Officers",
+        "detail": "Standard deployment to monitor and enforce parking regulations",
+        "resource": "Patrol Unit",
+    }
 
     recommendations = []
 
@@ -164,8 +204,15 @@ def generate_recommendations(profiles: Dict[int, Dict], impact: Dict[int, Dict],
         timing = f"Deploy before {min(peak_hours)}:00"
 
         priority_score = score_data.get("priority_score_normalized", 0)
-        resource = RESOURCE_TYPE.get(severity, "Monitor")
         eta = officers * ETA_PER_OFFICER_MIN
+
+        # Get root-cause-specific action
+        cid_str = str(cid)
+        dominant = "Unknown"
+        if xai and cid_str in xai:
+            dominant = xai[cid_str].get("dominant_factor", "Unknown")
+
+        action_cfg = ACTION_MAP.get(dominant, DEFAULT_ACTION)
 
         recommendations.append({
             "cluster_id": cid,
@@ -180,7 +227,10 @@ def generate_recommendations(profiles: Dict[int, Dict], impact: Dict[int, Dict],
             "total_violations": profile.get("total_violations", 0),
             "daily_rate": round(profile.get("daily_rate", 0), 1),
             "is_chronic": profile.get("is_chronic", False),
-            "resource_type": resource,
+            "resource_type": action_cfg["resource"],
+            "action": action_cfg["action"],
+            "action_detail": action_cfg["detail"],
+            "dominant_factor": dominant,
             "eta_minutes": eta,
             "centroid_lat": profile.get("centroid_lat", 0),
             "centroid_lon": profile.get("centroid_lon", 0),
@@ -363,10 +413,11 @@ def compute_dynamic_warnings(profiles: Dict[int, Dict], scores: Dict[int, Dict],
 
 
 def run_analytics(profiles: Dict[int, Dict], impact: Dict[int, Dict],
-                   scores: Dict[int, Dict], ripple: Dict[int, Dict]) -> Dict:
+                   scores: Dict[int, Dict], ripple: Dict[int, Dict],
+                   xai: Dict = None) -> Dict:
     print("Running analytics...")
 
-    recommendations = generate_recommendations(profiles, impact, scores)
+    recommendations = generate_recommendations(profiles, impact, scores, xai=xai)
     warnings = compute_dynamic_warnings(profiles, scores)
     dispatch_report = generate_dispatch_report(recommendations)
 
