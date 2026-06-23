@@ -1,85 +1,71 @@
+<div align="center">
+
 # Trixie — Parking Intelligence Platform
 
-AI-powered dashboard for parking congestion intelligence. Detects illegal parking hotspots, quantifies their impact on traffic flow, and enables targeted enforcement.
+**AI-powered platform that detects parking hotspots, predicts violations, and recommends enforcement actions using real traffic data.**
+
+[![Streamlit](https://img.shields.io/badge/Streamlit-Cloud-red?logo=streamlit)](https://trixie-flipkart.streamlit.app/)
+[![HuggingFace](https://img.shields.io/badge/HuggingFace-Spaces-yellow?logo=huggingface)](https://rakshit1236-trixie-backend.hf.space)
+
+</div>
+
+---
+
+## What It Does
+
+Trixie analyzes 115,000+ real Bengaluru traffic police violations to build an end-to-end parking intelligence system. It clusters 1,263 hotspots across the city, quantifies their impact on traffic speed using physics-based models, and predicts tomorrow's violations with a tuned ML ensemble — all served through a full-stack dashboard.
 
 ## Features
 
-- **Executive Overview** — KPIs, heatmaps, forecast with confidence gauges
-- **What-If Simulator** — One-click preset scenarios + counterfactual AI mode
-- **Congestion Propagation** — Step-by-step cascade timeline visualization
-- **Insights** — SHAP-based Explainable AI + Root Cause Attribution cards
-- **Actions** — Early Warning Timeline + Enhanced Dispatch cards with ETA
-- **Validation** — Backtesting + drift detection
-
-## Innovation Features
-
-### 1. Scenario Simulator with Presets
-One-click buttons for common scenarios: Remove Illegal Parking, Festival Day, Heavy Rain, Metro Delay, Increase Capacity.
-
-### 2. Counterfactual AI
-"What if parking occupancy were 15% lower?" — See predicted impact on speed, violations, and queue length.
-
-### 3. Congestion Propagation Timeline
-Step-by-step cascade visualization: "8:10 Metro Station → 8:18 Ring Road → 8:26 Main Road → 8:40 Cross Road"
-
-### 4. Root Cause Attribution
-Human-readable cards showing: "Illegal Parking 48%, Road Width 21%, Weather 13%, Event 18%"
-
-### 5. Early Warning Timeline
-Visual progression: Normal → Risk Rising → Congestion Expected → Critical
-
-### 6. Enhanced Dispatch
-Cards with ETA, resource type (Officers/Tow Truck), and expected delay reduction.
+| Tab | Feature | What It Does |
+|-----|---------|-------------|
+| **Overview** | Executive KPIs + Heatmaps | Hotspot distribution, confidence gauges, tomorrow's forecast with error bars |
+| **What-If** | Scenario Simulator + Counterfactual AI | One-click presets (Festival, Rain, etc.) + custom occupancy reduction |
+| **Propagation** | Congestion Cascade Timeline | BFS simulation of how congestion ripples through road networks |
+| **Insights** | SHAP Root Cause Analysis + PRI | Why each hotspot exists — with ranked risk scores and factor breakdowns |
+| **Actions** | Dynamic Warnings + 30-Day Forecast | Hour-specific threat levels + ML-powered monthly forecast with CI bands |
+| **Validation** | Model Health Dashboard | Live R², MAE, pipeline status, and drift detection |
 
 ## Architecture
 
 ```
-┌─────────────────────┐     REST API     ┌──────────────────────┐
-│   Streamlit Cloud   │ ◄──────────────► │  HuggingFace Spaces  │
-│   (Dashboard UI)    │                  │  (ML Pipeline)       │
-│                     │  GET /hotspots   │  FastAPI + LightGBM  │
-│  - Executive KPIs   │  POST /scenario  │  XGBoost + Optuna    │
-│  - What-If Simulator│  GET /predictions│  HDBSCAN + SHAP      │
-│  - Propagation      │  GET /warnings   │                      │
-│  - Insights (XAI)   │  POST /propagate │                      │
-│  - Actions          │  POST /counterf. │                      │
-└─────────────────────┘                  └──────────────────────┘
+┌─────────────────────┐         ┌──────────────────────────┐
+│   Streamlit Cloud   │  REST   │    HuggingFace Spaces    │
+│   (Dashboard UI)    │ ◄─────► │    (FastAPI Backend)     │
+│                     │  API    │                          │
+│  6 tabs + sidebar   │         │  JSON cache (23 MB)      │
+│  Plotly + Folium    │         │  16 endpoints             │
+└─────────────────────┘         └──────────────────────────┘
 ```
 
-## Setup
-
-### Local Development
-
-```bash
-# Install dependencies
-pip install -r requirements.txt
-
-# Run pipeline
-python -c "from src.data_pipeline import run_pipeline; from src.clustering import cluster_hotspots; from src.traffic_impact import run_impact_analysis; from src.scoring import run_scoring; from src.predictive_model import run_ml_pipeline; from src.analytics import run_analytics; print('Pipeline modules loaded')"
-
-# Run Streamlit app
-streamlit run app.py
-```
-
-### Deploy to HuggingFace Spaces
-
-1. Create a new HuggingFace Space with Docker SDK (port 7860)
-2. Upload `hf_backend/` contents
-3. Set `HF_REPO_ID` environment variable if using dataset repo
-
-### Deploy Dashboard to Streamlit Cloud
-
-1. Push to GitHub
-2. Connect at https://share.streamlit.io
-3. Set main file to `app.py`
-4. Add `BACKEND_URL` secret pointing to your HuggingFace Space
+**Pipeline:** Data (115K records) → HDBSCAN Clustering (1,263 hotspots) → Greenshields Traffic Impact → Priority Scoring → LGB+XGB+CatBoost Ensemble → SHAP XAI → Dispatch Recommendations
 
 ## Tech Stack
 
-- **ML**: LightGBM + XGBoost ensemble with Optuna tuning
-- **XAI**: True SHAP explanations (not heuristic weights)
-- **Traffic**: Greenshields model + M/M/1 queue approximation
-- **Clustering**: HDBSCAN with KD-tree adjacency
-- **Prediction**: Conformal prediction with coverage guarantees
-- **Frontend**: Streamlit + Plotly + Folium
-- **Backend**: FastAPI + HuggingFace Spaces
+| Layer | |
+|-------|--|
+| **ML** | LightGBM + XGBoost + CatBoost (stacking with RidgeCV meta-learner) |
+| **Tuning** | Optuna (30 trials, TPE sampler, 5-fold time-series CV) |
+| **Explainability** | SHAP TreeExplainer — real per-feature attributions |
+| **Traffic Model** | Greenshields speed-density + M/M/1 queue approximation |
+| **Clustering** | HDBSCAN + KD-tree adjacency (2 km radius) |
+| **Prediction** | Conformal prediction intervals (90% coverage) |
+| **Frontend** | Streamlit + Plotly + Folium |
+| **Backend** | FastAPI + GZip compression on HuggingFace Spaces |
+| **Data** | Bengaluru Police Violations (Jan–May), 150+ pincode areas |
+
+## Quick Start
+
+```bash
+# Install
+pip install -r requirements.txt
+
+# Run dashboard
+streamlit run app.py
+```
+
+## Links
+
+- **Dashboard:** [trixie-flipkart.streamlit.app](https://trixie-flipkart.streamlit.app/)
+- **Backend API:** [rakshit1236-trixie-backend.hf.space](https://rakshit1236-trixie-backend.hf.space)
+- **Health Check:** [/health](https://rakshit1236-trixie-backend.hf.space/health)
