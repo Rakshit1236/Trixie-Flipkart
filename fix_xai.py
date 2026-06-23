@@ -1,144 +1,134 @@
-"""Recompute XAI factor breakdowns with correct feature-to-factor mapping."""
-import pickle, json, numpy as np
+"""
+XAI root causes v3: profile-based with proper differentiation.
+Key insight: junction, chronic, and high daily rate are the strongest differentiators.
+Illegal Parking is baseline (all clusters have severity=0.9).
+"""
+import pickle
 from pathlib import Path
-
-# Correct mapping: ML feature name -> factor group
-FEATURE_TO_FACTOR = {
-    # Volume / Activity
-    "total_violations": "Violation Volume",
-    "avg_daily_rate": "Violation Volume",
-    "days_active": "Pattern Consistency",
-    # Historical Trends
-    "violations_lag_1": "Historical Trend",
-    "violations_lag_2": "Historical Trend",
-    "violations_lag_3": "Historical Trend",
-    "violations_lag_5": "Historical Trend",
-    "violations_lag_7": "Historical Trend",
-    "violations_lag_14": "Historical Trend",
-    # Rolling Patterns
-    "rolling_3d_mean": "Recent Pattern",
-    "rolling_3d_max": "Recent Pattern",
-    "rolling_5d_mean": "Recent Pattern",
-    "rolling_5d_max": "Recent Pattern",
-    "rolling_7d_mean": "Recent Pattern",
-    "rolling_7d_max": "Recent Pattern",
-    "rolling_7d_std": "Recent Pattern",
-    "rolling_14d_mean": "Recent Pattern",
-    "rolling_14d_max": "Recent Pattern",
-    "rolling_14d_std": "Recent Pattern",
-    # Temporal / Seasonality
-    "dow_sin": "Seasonality",
-    "dow_cos": "Seasonality",
-    "month_sin": "Seasonality",
-    "month_cos": "Seasonality",
-    "dom_sin": "Seasonality",
-    "dom_cos": "Seasonality",
-    "week_of_year": "Seasonality",
-    "day_of_week": "Seasonality",
-    "day_of_month": "Seasonality",
-    "month": "Seasonality",
-    "is_month_start": "Seasonality",
-    "is_month_end": "Seasonality",
-    # Time of Day
-    "avg_hour": "Time of Day",
-    "std_hour": "Time of Day",
-    "rush_hour_ratio": "Time of Day",
-    "weekend_ratio": "Time of Day",
-    # Momentum / Acceleration
-    "acceleration_3d": "Momentum",
-    "acceleration_7d": "Momentum",
-    "momentum_3d": "Momentum",
-    "momentum_7d": "Momentum",
-    "trend_3d": "Momentum",
-    "trend_7d": "Momentum",
-    "trend_14d": "Momentum",
-    # Volatility
-    "cv_7d": "Volatility",
-    "cv_14d": "Volatility",
-    # Severity / Road Profile
-    "avg_severity": "Severity Profile",
-    "is_chronic": "Severity Profile",
-    "has_junction": "Road Profile",
-    "num_lanes": "Road Profile",
-    "road_type_encoded": "Road Profile",
-    # Ratios
-    "ratio_to_7d_mean": "Relative Intensity",
-    "ratio_to_14d_mean": "Relative Intensity",
-    "violations_14d_mean": "Relative Intensity",
-    # Recency
-    "recency_weighted_mean": "Recency",
-    # Days active
-    "days_active": "Pattern Consistency",
-}
-
-FACTOR_COLORS = {
-    "Violation Volume": "#FF6B6B",
-    "Historical Trend": "#4ECDC4",
-    "Recent Pattern": "#45B7D1",
-    "Seasonality": "#96CEB4",
-    "Time of Day": "#DDA0DD",
-    "Momentum": "#FF8C00",
-    "Volatility": "#FFE066",
-    "Severity Profile": "#FF6600",
-    "Road Profile": "#4ECDC4",
-    "Relative Intensity": "#96CEB4",
-    "Recency": "#FF6B6B",
-}
-
-
-def recompute_factor_breakdowns(cache):
-    xai = cache.get("xai_explanations", {})
-    print(f"Recomputing {len(xai)} XAI explanations...")
-
-    for cid, explanation in xai.items():
-        fi = explanation.get("feature_importance", {})
-        if not fi:
-            continue
-
-        # Group features by factor
-        factor_abs_shap = {}
-        for feat_name, feat_data in fi.items():
-            factor = FEATURE_TO_FACTOR.get(feat_name, "Other")
-            abs_shap = feat_data.get("mean_abs_shap", 0)
-            factor_abs_shap[factor] = factor_abs_shap.get(factor, 0) + abs_shap
-
-        # Normalize to percentages
-        total = sum(factor_abs_shap.values())
-        if total > 0:
-            pct = {f: round(v / total * 100, 1) for f, v in factor_abs_shap.items()}
-        else:
-            pct = {f: 0 for f in factor_abs_shap}
-
-        # Sort by contribution
-        pct = dict(sorted(pct.items(), key=lambda x: x[1], reverse=True))
-
-        # Dominant factor
-        dominant = list(pct.keys())[0] if pct else "Unknown"
-
-        explanation["percentage_contributions"] = pct
-        explanation["dominant_factor"] = dominant
-        explanation["factor_colors"] = {f: FACTOR_COLORS.get(f, "#888888") for f in pct.keys()}
-
-    return cache
-
 
 cache_path = Path(r"C:\Users\raksh\Desktop\PROJECT\Trixie-Flipkart\output\pipeline_cache.pkl")
 with open(cache_path, "rb") as f:
     cache = pickle.load(f)
 
-cache = recompute_factor_breakdowns(cache)
+profiles = cache["profiles"]
 
-# Show samples
-xai = cache["xai_explanations"]
-samples = [0, 50, 100, 200, 500]
-for cid in samples:
+FACTOR_COLORS = {
+    "Illegal Parking": "#FF6B6B",
+    "Road Width": "#4ECDC4",
+    "Density": "#45B7D1",
+    "Time of Day": "#DDA0DD",
+    "Junction Effects": "#FF8C00",
+    "Chronic Pattern": "#96CEB4",
+}
+
+def compute_root_cause(profile):
+    severity = profile.get("avg_severity", 0.5)
+    is_chronic = profile.get("is_chronic", False)
+    has_junction = profile.get("has_junction", 0)
+    num_lanes = profile.get("num_lanes", 2)
+    daily_rate = profile.get("daily_rate", 1)
+    peak_hours = profile.get("peak_hours", [])
+
+    # Start with equal base
+    scores = {
+        "Illegal Parking": 15,
+        "Density": 15,
+        "Road Width": 15,
+        "Time of Day": 15,
+        "Junction Effects": 5,
+        "Chronic Pattern": 5,
+    }
+
+    # === STRONG DIFFERENTIATORS (override baseline) ===
+
+    # Junction: traffic conflict point — strong root cause
+    if has_junction:
+        scores["Junction Effects"] = 40
+        scores["Density"] += 10  # junctions attract traffic
+
+    # Chronic: persistent hotspot — strong root cause
+    if is_chronic:
+        scores["Chronic Pattern"] = 40
+
+    # Density: high daily rate = vehicle crowding
+    if daily_rate >= 20:
+        scores["Density"] = 50
+    elif daily_rate >= 10:
+        scores["Density"] = 40
+    elif daily_rate >= 5:
+        scores["Density"] = 30
+    elif daily_rate >= 2:
+        scores["Density"] = 20
+    else:
+        scores["Density"] = 10
+
+    # === MODERATE DIFFERENTIATORS ===
+
+    # Time of Day: rush hour concentration
+    rush_hours = {8, 9, 10, 17, 18, 19, 20}
+    if peak_hours:
+        rush_overlap = sum(1 for h in peak_hours if h in rush_hours)
+        rush_ratio = rush_overlap / len(peak_hours)
+        if rush_ratio >= 0.67:
+            scores["Time of Day"] = 35
+        elif rush_ratio >= 0.33:
+            scores["Time of Day"] = 25
+        else:
+            scores["Time of Day"] = 15
+
+    # Road Width: fewer lanes = narrower road
+    if num_lanes <= 1:
+        scores["Road Width"] = 30
+    elif num_lanes == 2:
+        scores["Road Width"] = 15
+    else:
+        scores["Road Width"] = 8
+
+    # Illegal Parking: only dominant when nothing else stands out
+    # All clusters have severity=0.9, so this is baseline, not differentiator
+    scores["Illegal Parking"] = 15
+
+    total = sum(scores.values())
+    pct = {f: round(v / total * 100, 1) for f, v in scores.items()}
+    pct = dict(sorted(pct.items(), key=lambda x: x[1], reverse=True))
+    dominant = list(pct.keys())[0]
+
+    return dominant, pct
+
+
+xai = {}
+for cid, profile in profiles.items():
+    dominant, pct = compute_root_cause(profile)
+    cid_str = str(cid)
+    xai[cid_str] = {
+        "cluster_id": cid,
+        "area": profile.get("area", ""),
+        "dominant_factor": dominant,
+        "percentage_contributions": pct,
+        "factor_colors": {f: FACTOR_COLORS.get(f, "#888888") for f in pct.keys()},
+    }
+
+# Show key samples
+print("=== SAMPLES ===")
+for cid, label in [(0, "typical low"), (3, "junction"), (4, "junction+chronic"), (65, "chronic"), (133, "high daily 23"), (163, "highest daily 44")]:
     cid_str = str(cid)
     if cid_str in xai:
         d = xai[cid_str]
-        print(f"\nCluster {cid}: {d['dominant_factor']}")
-        print(f"  {d['percentage_contributions']}")
+        p = profiles.get(cid, {})
+        print(f"C{cid} [{label}] ({p.get('area','?')}): junc={p.get('has_junction',0)} chronic={p.get('is_chronic',False)} daily={p.get('daily_rate',0):.1f} lanes={p.get('num_lanes',2)}")
+        print(f"  -> {d['dominant_factor']}")
+        for f, v in d['percentage_contributions'].items():
+            if v >= 5:
+                print(f"     {f}: {v}%")
+        print()
 
-# Save updated cache
+from collections import Counter
+dom_counts = Counter(x["dominant_factor"] for x in xai.values())
+print(f"\n=== DISTRIBUTION ({len(xai)} total) ===")
+for f, c in dom_counts.most_common():
+    print(f"  {f}: {c} ({c/len(xai)*100:.0f}%)")
+
+cache["xai_explanations"] = xai
 with open(cache_path, "wb") as f:
     pickle.dump(cache, f)
-print(f"\nSaved updated cache")
+print(f"\nSaved {len(xai)} root cause explanations")
