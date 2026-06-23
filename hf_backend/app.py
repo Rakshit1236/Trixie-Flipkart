@@ -14,8 +14,11 @@ from typing import Optional
 import uvicorn
 import numpy as np
 
+from fastapi.middleware.gzip import GZipMiddleware
+
 app = FastAPI(title="Trixie Parking Intelligence API")
 
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

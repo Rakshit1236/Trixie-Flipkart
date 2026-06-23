@@ -140,7 +140,7 @@ def render_dispatch_card(rec, index):
     """, unsafe_allow_html=True)
 
 
-def render_tab_actions(profiles, impact, scores, warnings, recommendations, forecast=None, forecast_summary=None):
+def render_tab_actions(profiles, impact, scores, warnings, recommendations, forecast_summary=None, backend_url=None):
     st.subheader("Actions")
 
     tab_warn, tab_forecast, tab_dispatch = st.tabs(["Early Warnings", "30-Day Forecast", "Action Recommendations"])
@@ -224,8 +224,7 @@ def render_tab_actions(profiles, impact, scores, warnings, recommendations, fore
         st.markdown("### 30-Day Violation Forecast")
         st.markdown("ML-powered daily violation predictions for the next 30 days per hotspot.")
 
-        if forecast and forecast_summary:
-            forecast_df = pd.DataFrame(forecast)
+        if forecast_summary:
             summary_df = pd.DataFrame(forecast_summary)
 
             # Citywide summary chart
@@ -241,33 +240,49 @@ def render_tab_actions(profiles, impact, scores, warnings, recommendations, fore
                               xaxis_title="Date", yaxis_title="Total Violations", hovermode="x unified")
             st.plotly_chart(fig, use_container_width=True)
 
-            # Per-hotspot selector
-            top_hotspots = forecast_df.groupby("cluster_id")["predicted_violations"].mean().nlargest(20).index.tolist()
-            selected_clusters = st.multiselect("Select Hotspots", options=top_hotspots, default=top_hotspots[:5], key="fc_clusters")
+            # Per-hotspot detail (lazy-loaded, only full 8MB forecast fetched on demand)
+            @st.cache_data(ttl=600, show_spinner="Loading detailed forecast data...")
+            def fetch_full_forecast(url):
+                import requests as _req
+                try:
+                    r = _req.get(f"{url}/forecast", timeout=60)
+                    r.raise_for_status()
+                    return r.json().get("forecast", [])
+                except Exception:
+                    return []
 
-            if selected_clusters:
-                fig2 = go.Figure()
-                colors = px.colors.qualitative.Set2
-                for i, cid in enumerate(selected_clusters):
-                    subset = forecast_df[forecast_df["cluster_id"] == cid]
-                    area = subset["area"].iloc[0] if len(subset) > 0 else f"Cluster {cid}"
-                    fig2.add_trace(go.Scatter(x=subset["date"], y=subset["predicted_violations"],
-                                              mode="lines+markers", name=f"C{cid} — {area}",
-                                              line=dict(color=colors[i % len(colors)], width=2),
-                                              marker=dict(size=3)))
-                fig2.update_layout(title="Per-Hotspot 30-Day Forecast", template="plotly_dark", height=400,
-                                   xaxis_title="Date", yaxis_title="Predicted Violations", hovermode="x unified")
-                st.plotly_chart(fig2, use_container_width=True)
+            show_detail = st.checkbox("Show per-hotspot forecast details (downloads ~8MB)", value=False, key="fc_toggle")
+            if show_detail and backend_url:
+                forecast = fetch_full_forecast(backend_url)
+                if forecast:
+                    forecast_df = pd.DataFrame(forecast)
+                    top_hotspots = forecast_df.groupby("cluster_id")["predicted_violations"].mean().nlargest(20).index.tolist()
+                    selected_clusters = st.multiselect("Select Hotspots", options=top_hotspots, default=top_hotspots[:5], key="fc_clusters")
 
-            # Forecast table
-            st.markdown("#### Top 20 Hotspots — Average Daily Forecast")
-            agg_fc = forecast_df.groupby(["cluster_id", "area", "road_type"]).agg(
-                avg_predicted=("predicted_violations", "mean"),
-                max_predicted=("predicted_violations", "max"),
-                avg_lower=("lower_bound", "mean"),
-                avg_upper=("upper_bound", "mean"),
-            ).reset_index().sort_values("avg_predicted", ascending=False)
-            st.dataframe(agg_fc.head(20), use_container_width=True)
+                    if selected_clusters:
+                        fig2 = go.Figure()
+                        colors = px.colors.qualitative.Set2
+                        for i, cid in enumerate(selected_clusters):
+                            subset = forecast_df[forecast_df["cluster_id"] == cid]
+                            area = subset["area"].iloc[0] if len(subset) > 0 else f"Cluster {cid}"
+                            fig2.add_trace(go.Scatter(x=subset["date"], y=subset["predicted_violations"],
+                                                      mode="lines+markers", name=f"C{cid} — {area}",
+                                                      line=dict(color=colors[i % len(colors)], width=2),
+                                                      marker=dict(size=3)))
+                        fig2.update_layout(title="Per-Hotspot 30-Day Forecast", template="plotly_dark", height=400,
+                                           xaxis_title="Date", yaxis_title="Predicted Violations", hovermode="x unified")
+                        st.plotly_chart(fig2, use_container_width=True)
+
+                    st.markdown("#### Top 20 Hotspots — Average Daily Forecast")
+                    agg_fc = forecast_df.groupby(["cluster_id", "area", "road_type"]).agg(
+                        avg_predicted=("predicted_violations", "mean"),
+                        max_predicted=("predicted_violations", "max"),
+                        avg_lower=("lower_bound", "mean"),
+                        avg_upper=("upper_bound", "mean"),
+                    ).reset_index().sort_values("avg_predicted", ascending=False)
+                    st.dataframe(agg_fc.head(20), use_container_width=True)
+                else:
+                    st.warning("Could not load detailed forecast data.")
         else:
             st.info("No 30-day forecast available. Re-run the pipeline to generate forecasts.")
 

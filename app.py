@@ -20,9 +20,9 @@ st.set_page_config(
 )
 
 
-def api_get(endpoint, params=None):
+def api_get(endpoint, params=None, timeout=30):
     try:
-        r = requests.get(f"{BACKEND_URL}{endpoint}", params=params, timeout=30)
+        r = requests.get(f"{BACKEND_URL}{endpoint}", params=params, timeout=timeout)
         r.raise_for_status()
         return r.json()
     except Exception as e:
@@ -69,7 +69,6 @@ def load_all_data():
     predictions = api_get("/predictions")
     recommendations = api_get("/analytics/recommendations")
     warnings = api_get("/analytics/warnings")
-    forecast = api_get("/forecast")
     forecast_summary = api_get("/forecast/summary")
 
     if any("error" in d for d in [hotspots, impact, scores, predictions, recommendations, warnings]):
@@ -86,7 +85,6 @@ def load_all_data():
         "dispatch_report": recommendations.get("dispatch_report", ""),
         "warnings": warnings.get("warnings", warnings) if isinstance(warnings, dict) and "warnings" in warnings else warnings,
         "warning_timestamps": warnings.get("timestamps", {}) if isinstance(warnings, dict) and "timestamps" in warnings else {},
-        "forecast": forecast.get("forecast", []) if isinstance(forecast, dict) else [],
         "forecast_summary": forecast_summary.get("forecast_summary", []) if isinstance(forecast_summary, dict) else [],
     }
 
@@ -138,7 +136,7 @@ with tab_insights:
 with tab_actions:
     from dashboard.tab_actions import render_tab_actions
     render_tab_actions(profiles, impact, scores, warnings, recommendations,
-                       data.get("forecast"), data.get("forecast_summary"))
+                       data.get("forecast_summary"), BACKEND_URL)
 
 with tab_validation:
     from dashboard.tab_validation import render_tab_validation
