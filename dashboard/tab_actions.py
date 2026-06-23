@@ -179,18 +179,26 @@ def render_tab_actions(profiles, impact, scores, warnings, recommendations, fore
             m = folium.Map(location=[BENGALURU_LAT, BENGALURU_LON], zoom_start=13, tiles="CartoDB dark_matter")
             tc = {"HIGH": "red", "MEDIUM": "orange", "LOW": "green"}
 
-            for w in hw[:50]:
+            # Show all warnings on map with different marker styles per level
+            for w in hw:
                 cid = str(w.get("cluster_id", ""))
                 p = profiles.get(cid, profiles.get(int(cid), {}))
                 lat = p.get("centroid_lat", BENGALURU_LAT)
                 lon = p.get("centroid_lon", BENGALURU_LON)
+                level = w.get("threat_level", "LOW")
+                ts = w.get("threat_score", 0)
+
+                radius = max(4, min(14, ts / 8)) if level == "HIGH" else max(4, min(10, ts / 12)) if level == "MEDIUM" else max(3, min(7, ts / 15))
+                opacity = 0.7 if level == "HIGH" else 0.55 if level == "MEDIUM" else 0.4
+                weight = 2 if level == "HIGH" else 1.5 if level == "MEDIUM" else 1
 
                 folium.CircleMarker(
                     location=[lat, lon],
-                    radius=max(5, min(15, w.get("threat_score", 0) / 10)),
-                    color=tc.get(w.get("threat_level", "LOW"), "blue"),
-                    fill=True, fill_color=tc.get(w.get("threat_level", "LOW"), "blue"), fill_opacity=0.6,
-                    popup=f"C{cid} — {w.get('area', '')}<br>Threat: {w.get('threat_level', '')} ({w.get('threat_score', 0):.0f})",
+                    radius=radius,
+                    color=tc.get(level, "blue"),
+                    fill=True, fill_color=tc.get(level, "blue"), fill_opacity=opacity,
+                    weight=weight,
+                    popup=f"C{cid} — {w.get('area', '')}<br>Threat: {level} ({ts:.0f})",
                 ).add_to(m)
 
             st_folium(m, width=800, height=500)
