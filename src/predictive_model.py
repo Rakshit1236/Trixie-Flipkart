@@ -621,7 +621,7 @@ def run_ml_pipeline(df: pd.DataFrame, profiles: Dict[int, Dict]):
     lgb_model, xgb_model, cat_model, meta_model, metrics, feature_names = train_ensemble(ml_df)
     predictions = predict_tomorrow(lgb_model, xgb_model, cat_model, meta_model, ml_df, feature_names, profiles, metrics)
     save_models(lgb_model, xgb_model, cat_model, meta_model, metrics, feature_names, predictions)
-    return predictions, metrics, feature_names
+    return predictions, metrics, feature_names, ml_df, lgb_model
 
 
 def generate_30day_forecast(ml_df: pd.DataFrame, profiles: Dict[int, Dict],

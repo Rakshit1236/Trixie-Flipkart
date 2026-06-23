@@ -29,6 +29,94 @@ app.add_middleware(
 
 PIPELINE_STATE = {}
 
+PINCODE_AREAS = {
+    "560001": "Avenue Road / Chickpet", "560002": "MG Road / Brigade Road",
+    "560003": "Basavanagudi", "560004": "Malleshwaram", "560005": "Rajajinagar",
+    "560006": "Vijayanagar", "560007": "Jayanagar", "560008": "Banashankari",
+    "560009": "Jalahalli", "560010": "Peenya Industrial Area", "560011": "Kengeri",
+    "560012": "Koramangala", "560013": "HSR Layout", "560014": "Bommanahalli",
+    "560015": "Bilekahalli", "560016": "Whitefield", "560017": "Mahadevapura",
+    "560018": "KR Puram", "560019": "ITPL / Whitefield East", "560020": "Hoskote",
+    "560021": "Banaswadi", "560022": "Ramamurthy Nagar", "560023": "Kalyan Nagar",
+    "560024": "Hebbal", "560025": "Jakkur", "560026": "Yelahanka",
+    "560027": "Attur", "560028": "Sahakara Nagar", "560029": "Hegde Nagar",
+    "560030": "RT Nagar", "560032": "HMT Layout", "560033": "Vidyaranyapura",
+    "560034": "Dodda Basti", "560035": "Sanjay Nagar", "560036": "Indiranagar",
+    "560037": "Murugeshpalya", "560038": "HAL Airport Road", "560040": "Marathahalli",
+    "560041": "Belandur", "560042": "Sarjapur Road", "560043": "Bellandur",
+    "560044": "Varthur", "560045": "Gunjur", "560046": "Domlur",
+    "560047": "Old Airport Road", "560048": "Viman Nagar", "560049": "Nagarbhavi",
+    "560050": "Rajaji Nagar", "560051": "Basaveshwara Nagar", "560052": "Chord Road Junction",
+    "560053": "Srinagar", "560054": "Bapuji Nagar", "560055": "Banagiri",
+    "560056": "BTM Layout", "560057": "Madiwala", "560058": "Koramangala 5th Block",
+    "560059": "Electronic City", "560060": "Anekal", "560061": "Chikkathogur",
+    "560062": "Nelamangala", "560063": "Kumbalgodu", "560064": "Rajaji Nagar West",
+    "560065": "Chord Road", "560066": "Mahalakshmi Layout", "560067": "Laggere",
+    "560068": "Peenya South", "560069": "Nagawara", "560070": "Hennur",
+    "560071": "Budigere", "560072": "Kadugodi", "560073": "Bommasandra",
+    "560074": "Hosur Road", "560075": "Mallasandra", "560076": "Thavarekere",
+    "560077": "Moodalapalya", "560078": "Uttarahalli", "560079": "Kanakapura Road",
+    "560080": "Konanakunte", "560081": "Doddakallasandra", "560082": "Vasanthapura",
+    "560083": "Anjanapura", "560084": "Kaggalipura", "560085": "Sarakki Nagar",
+    "560086": "JP Nagar", "560087": "Bommanahalli Phase 1", "560088": "Begur",
+    "560089": "Hulimavu", "560090": "Govindaraj Nagar", "560091": "Padmanabhanagar",
+    "560092": "Kumaraswamy Layout", "560093": "Sarakki", "560094": "Chikkallegudhi",
+    "560095": "Bettadasanapura", "560096": "Munnekollal", "560097": "Marathahalli Bridge",
+    "560098": "Kadubeesanahalli", "560099": "Munnekollal Village", "560100": "Kodathi",
+    "560102": "Electronic City Phase 2", "560103": "Hebbal Kempapura",
+    "560104": "Jakkuru Layout", "560105": "Thanisandra", "560106": "Benniganahalli",
+    "560107": "Kasturi Nagar", "560108": "Frazer Town", "560109": "Pulakeshi Nagar",
+    "560110": "Cox Town", "560111": "Benson Town", "560112": "Fraser Town",
+    "560113": "Bangalore Cantonment", "560114": "Vasanth Nagar", "560115": "Santry",
+    "560116": "Richmond Town", "560117": "Langford Town", "560118": "Shivajinagar",
+    "560119": "Sampangirama Nagar", "560120": "Gandhinagar", "560121": "Balekundri",
+    "560122": "Raj Bhavan", "560123": "Cubbon Road", "560124": "Ambedkar Nagar",
+    "560125": "Koramangala 1st Block", "560126": "Koramangala 2nd Block",
+    "560127": "Koramangala 3rd Block", "560128": "Koramangala 4th Block",
+    "560129": "Koramangala 6th Block", "560130": "Koramangala 7th Block",
+    "560131": "Koramangala 8th Block", "560132": "Koramangala 9th Block",
+    "560133": "Koramangala 10th Block", "560134": "Koramangala 11th Block",
+    "560135": "Jakkasandra", "560136": "HSR Layout 1st Sector",
+    "560137": "HSR Layout 2nd Sector", "560138": "HSR Layout 3rd Sector",
+    "560139": "HSR Layout 4th Sector", "560140": "HSR Layout 5th Sector",
+    "560141": "HSR Layout 6th Sector", "560142": "HSR Layout 7th Sector",
+    "562100": "Chikkabanavara", "562101": "Nelamangala Town", "562102": "Doddaballapura",
+    "562103": "Gauribidanur", "562104": "Chintamani", "562105": "Srinivaspur",
+    "562106": "Bangarpet", "562107": "Kolar Gold Fields", "562108": "Mulbagal",
+    "562109": "Malur", "562110": "Devanahalli", "562111": "Bidadi",
+    "562112": "Ramanagara", "562130": "Shivoham", "562149": "Doddagubbi",
+    "562150": "Bidadi Industrial Area", "562157": "Bommasandra Industrial Area",
+    "562162": "Jigani", "563101": "Tumkur Road", "563160": "Tumkur Town",
+}
+
+
+def resolve_area(area_str):
+    if not area_str:
+        return "Unknown"
+    pin = area_str.replace(" (India)", "").replace("(India)", "").strip()
+    return PINCODE_AREAS.get(pin, area_str)
+
+
+def resolve_all_areas():
+    for cid, profile in PIPELINE_STATE.get("profiles", {}).items():
+        if "area" in profile:
+            profile["area"] = resolve_area(profile["area"])
+    for cid, impact_data in PIPELINE_STATE.get("impact", {}).items():
+        if "area" in impact_data:
+            impact_data["area"] = resolve_area(impact_data["area"])
+    for pred in PIPELINE_STATE.get("predictions", []):
+        if "area" in pred:
+            pred["area"] = resolve_area(pred["area"])
+    for item in PIPELINE_STATE.get("ranked", []):
+        if "area" in item:
+            item["area"] = resolve_area(item["area"])
+    for rec in PIPELINE_STATE.get("analytics", {}).get("recommendations", []):
+        if "area" in rec:
+            rec["area"] = resolve_area(rec["area"])
+    for fc in PIPELINE_STATE.get("forecast", []):
+        if "area" in fc:
+            fc["area"] = resolve_area(fc["area"])
+
 
 def load_cache():
     global PIPELINE_STATE
@@ -49,6 +137,7 @@ def load_cache():
     if cache_path.exists():
         with open(cache_path, "r") as f:
             PIPELINE_STATE = json.load(f)
+        resolve_all_areas()
         print(f"Loaded cache: {len(PIPELINE_STATE)} keys")
         return True
     return False
