@@ -490,7 +490,7 @@ def run_propagation(req: PropagationRequest):
     from collections import deque
 
     profiles = PIPELINE_STATE["profiles"]
-    adjacency = {cid: p.get("neighbors", []) for cid, p in profiles.items()}
+    adjacency = {str(cid): [str(n) for n in p.get("neighbors", [])] for cid, p in profiles.items()}
 
     FREE_FLOW_SPEED = 40.0
     LANE_CAPACITY = 600
@@ -499,11 +499,11 @@ def run_propagation(req: PropagationRequest):
 
     source_cid = req.source_cluster_id
     source_cid_str = str(source_cid)
-    if source_cid not in profiles and source_cid_str not in profiles:
+    if source_cid_str not in profiles and source_cid not in profiles:
         raise HTTPException(status_code=404, detail=f"Source cluster {source_cid} not found")
 
-    source_profile = profiles.get(source_cid, profiles.get(source_cid_str, {}))
-    initial_demand = source_profile["daily_rate"] * 10
+    source_profile = profiles.get(source_cid_str, profiles.get(source_cid, {}))
+    initial_demand = source_profile["daily_rate"] * 20
 
     timeline = []
     queue = deque([(source_cid_str, 0, initial_demand)])
@@ -567,7 +567,7 @@ def run_propagation(req: PropagationRequest):
             if next_minute <= req.horizon_minutes:
                 decay = 0.85 ** dist_km
                 propagated_demand = demand * decay * 0.7
-                if propagated_demand > 10:
+                if propagated_demand > 5:
                     queue.append((nid_str, next_minute, propagated_demand))
                     visited.add(nid_str)
 
